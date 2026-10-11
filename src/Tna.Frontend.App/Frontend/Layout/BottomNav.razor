@@ -1,0 +1,10 @@
+@* スマホの下のタブ。親指の届く位置に置き、いまの画面をいつも示す *@
+<nav class="tna-bottom-nav" aria-label="メニュー">
+    @foreach (var item in NavItems.Tabs)
+    {
+        <NavLink class="tna-bottom-nav-item" href="@item.Href" Match="@item.Match">
+            <MudIcon Icon="@item.Icon" />
+            <span>@item.Title</span>
+        </NavLink>
+    }
+</nav>

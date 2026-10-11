@@ -1,0 +1,27 @@
+@inherits LayoutComponentBase
+
+@* PC は左のメニュー、スマホは下のタブで画面を移る *@
+<MudLayout>
+    <MudAppBar Elevation="1" Dense="true">
+        <MudText Typo="Typo.h6">勤怠管理</MudText>
+    </MudAppBar>
+    <MudDrawer @bind-Open="drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="1">
+        <NavMenu />
+    </MudDrawer>
+    <MudMainContent Class="tna-main">
+        <MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+            <ErrorBoundary @ref="errorBoundary">
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent>
+                    <MudAlert Severity="Severity.Error" Class="mb-4">エラーが発生しました。</MudAlert>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Recover">再試行</MudButton>
+                </ErrorContent>
+            </ErrorBoundary>
+        </MudContainer>
+    </MudMainContent>
+    <MudHidden Breakpoint="Breakpoint.MdAndUp">
+        <BottomNav />
+    </MudHidden>
+</MudLayout>

@@ -2,6 +2,8 @@
   <Folder Name="/Backend/">
   </Folder>
   <Folder Name="/Frontend/">
+    <Project Path="src/Tna.Frontend.App/Tna.Frontend.App.csproj" />
+    <Project Path="src/Tna.Frontend.Client/Tna.Frontend.Client.csproj" />
   </Folder>
   <Folder Name="/Local/">
   </Folder>
@@ -12,6 +14,7 @@
   <Folder Name="/Tools/">
   </Folder>
   <Folder Name="/Test/">
+    <Project Path="tests/Tna.FrontendTests/Tna.FrontendTests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />

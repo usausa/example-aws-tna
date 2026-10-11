@@ -1,0 +1,7 @@
+@* PC の左のメニュー *@
+<MudNavMenu>
+    @foreach (var item in NavItems.Menu)
+    {
+        <MudNavLink Href="@item.Href" Match="@item.Match" Icon="@item.Icon">@item.Title</MudNavLink>
+    }
+</MudNavMenu>
