@@ -270,6 +270,10 @@ ClientBin/
 *.publishsettings
 orleans.codegen.cs
 
+# Including strong name files can present a security risk
+# (https://github.com/github/gitignore/pull/2483#issue-259490424)
+#*.snk
+
 # Since there are multiple workflows, uncomment next line to ignore bower_components
 # (https://github.com/github/gitignore/pull/1529#issuecomment-104372622)
 #bower_components/
@@ -424,5 +428,26 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-# Official VS Code C# Dev Kit Extension exclusion
-#*.lscache
+# AI
+CLAUDE.local.md
+.claude/settings.local.json
+.chrome-temp
+.edge-temp
+.dotnet-home
+
+# Custom
+desktop.ini
+__*
+
+# AWS CDK
+cdk.out/
+
+# PoC: local NuGet feed and publish output
+poc/**/local-feed/
+poc/**/out/
+
+# Local NuGet feed of the unpublished handler library (B-00)
+local-feed/
+
+# The local environment: a file that the SSH of the container tunnel may write as "NUL" on Windows (B-10)
+src/Tna.AppHost/NUL

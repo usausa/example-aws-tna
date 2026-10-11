@@ -1,0 +1,29 @@
+<Solution>
+  <Folder Name="/Backend/">
+  </Folder>
+  <Folder Name="/Frontend/">
+  </Folder>
+  <Folder Name="/Local/">
+  </Folder>
+  <Folder Name="/IaC/">
+  </Folder>
+  <Folder Name="/Shared/">
+  </Folder>
+  <Folder Name="/Tools/">
+  </Folder>
+  <Folder Name="/Test/">
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
+    <File Path="Analyzers.ruleset" />
+    <File Path="CodeCoverage.runsettings" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Build.targets" />
+    <File Path="Directory.Packages.props" />
+    <File Path="README.md" />
+    <File Path="Tna.sln.DotSettings" />
+  </Folder>
+</Solution>
