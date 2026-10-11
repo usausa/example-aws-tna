@@ -438,16 +438,14 @@ CLAUDE.local.md
 # Custom
 desktop.ini
 __*
+/Publish/
+/Log/
+/Storage/
+*.db
 
+# Claude Code
+.claude/worktrees/
+.claude/settings.local.json
 # AWS CDK
 cdk.out/
 
-# PoC: local NuGet feed and publish output
-poc/**/local-feed/
-poc/**/out/
-
-# Local NuGet feed of the unpublished handler library (B-00)
-local-feed/
-
-# The local environment: a file that the SSH of the container tunnel may write as "NUL" on Windows (B-10)
-src/Tna.AppHost/NUL

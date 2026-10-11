@@ -1,15 +1,28 @@
-# Coding Style
+# プロジェクトの規則
 
-- **General:** Follow the rules defined in .editorconfig
-- **Instance field:** Do not use `_` prefix for member variables
-- **Warnings:** Ensure there are no build warnings
-- **Suppress warnings:** If warning suppression is needed, ask before applying the fix
-- **Language:** Use English for code comments, log messages, and script messages. Use Japanese for UI text
-- **Line endings:** Never change existing line endings, use CRLF for newly created text files
+## コーディングスタイル
 
-# Project
+- `.editorconfig` (C#) と `terminal/Settings.XamlStyler` (XAML) の規則に従う (これらのファイル自体は変更しない)
+- フィールドに `_` 接頭辞を付けない
+- ビルド警告が出ない状態になるように実装する。警告の抑止は理由のあるものだけにし、抑止する前に確認する
+- 既存ファイルの改行コードは変えない。新しく作るテキストファイルは CRLF
+- ソースのコメントは日本語で、意図や制約を書く (コードの言い換えは書かない)。区切りの帯 (`//----` で挟んだ `// Xxx`) の見出しは英語の名詞でよい
+- XML ドキュメントコメントは付けず、区切りコメント (`// Xxx`、`//----` の帯) でまとめる
+- ソースのコメントから設計文書 (文書名、節番号、画面 ID、決定番号) を参照しない (ソースが正)
+- クラスの DI は従来型のコンストラクタで受ける (プライマリコンストラクタは使わない)。Blazor の部品は `[Inject]`、端末の画面間の状態は `[Scope]`、エンドポイントはハンドラの引数で受ける
+- コンストラクタの引数とフィールドは、基盤 (`ILogger<T>`、`TimeProvider`、`IDbProvider`、`IDialect`) を先、固有のサービスを後に並べる (端末の ViewModel は terminal.md の順。既存のクラスは触ったときに揃える)
 
-- **Specification first:** The documents under `docs/` (OpenAPI, calculation and leave specifications, data model) are the source of truth. Update them before changing the behavior
-- **Native AOT:** Lambda functions are published with Native AOT. Do not depend on reflection (see `docs/design/architecture.md` section 4.6)
-- **Names:** Generic documents do not name companies or products. Such information goes to Markdown files whose names start with `__` (not in git)
-- **Quality gate:** Run `scripts/check.ps1` before asking for a review
+## 検証
+
+- 作業の単位ごとに、Release ビルド (サーバ・端末とも警告 0。端末は Debug も)、テスト、InspectCode (両ソリューション、ソリューション全体解析、新しい `--caches-home`、0 件)、改行コードと文書の改行を確かめる (手順とスクリプトは `.claude/skills/verify/`)
+- テストは `dotnet run --project` で実行する。`dotnet test` は使わない
+- UI の変更は、端末はエミュレータ、管理画面はブラウザで動作を確認する
+- 画面の見た目を変えたら README の画像 (`docs/images/`) を撮り直す
+
+## 進め方
+
+- 設計を変えたら `docs/decisions.md` の方針を今の形に直し (新しい方針は足し)、該当する設計文書も現状に直してから作業を閉じる
+- レビューの指摘は「どうあるべきか」の形で該当する規則ファイルに足す
+- コミットとプッシュは指示があったときだけ行う。メッセージは日本語で、要約 1 行 (「。」を付けない) と変更点の箇条書き
+- パッケージの追加・更新は事前に確認する。バージョンは csproj に直接書いて固定する (CPM や浮動バージョンは使わない)
+- NuGet の脆弱性警告 (NU1902 / NU1903) は `NoWarn` で消さず、推移的依存を直接ピンして GHSA 番号をコメントに書く
