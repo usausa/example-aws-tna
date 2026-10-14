@@ -1,0 +1,297 @@
+# 本人用（/api/v1/me）。bearerAuth の employee スコープ。
+me:
+  get:
+    tags: [me]
+    operationId: getMe
+    x-module: Self
+    summary: 本人の情報を取得する
+    description: テナント、従業員、ロール、アカウント、機能の設定を返す。画面の起動時に呼び、すべての画面で使う。
+    responses:
+      "200":
+        description: 本人の情報。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Me
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+meToday:
+  get:
+    tags: [me]
+    operationId: getMyToday
+    x-module: Self
+    summary: 当日の状態を取得する
+    description: 勤務日、状態、押せる打刻の種類、予定、打刻、警告を返す（UC-EM-01）。
+    responses:
+      "200":
+        description: 当日の状態。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/Today
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+mePunches:
+  post:
+    tags: [me]
+    operationId: createMyPunch
+    x-module: Punch
+    summary: 打刻する
+    description: |
+      打刻を記録し、当日の状態を返す（UC-EM-02）。時刻はサーバーの受信時刻を使う。
+      退勤済みの日の退勤は、退勤時刻の更新として受け付ける。日別勤怠の再計算は非同期。
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/attendance.yaml#/PunchCreateRequest
+          examples:
+            clockIn:
+              summary: 出勤
+              value:
+                type: clockIn
+                clientTime: "2026-10-07T08:58:12+09:00"
+    responses:
+      "201":
+        description: 記録した（同じ冪等キーの再送にも、最初の結果を 201 で返す）。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/PunchCreateResponse
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 状態に合わない（PUNCH_SEQUENCE_INVALID）、締め済み（PERIOD_CLOSED）、受付期限切れ（PUNCH_WINDOW_EXPIRED）、在籍外（EMPLOYEE_INACTIVE）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        $ref: ../components/responses.yaml#/UnprocessableEntity
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+meTimesheet:
+  get:
+    tags: [me]
+    operationId: getMyTimesheet
+    x-module: Self
+    summary: 月の勤怠を取得する
+    description: 給与の締め期間の日別勤怠と集計を返す（UC-EM-03）。フレックスの従業員には清算期間の状況も返す。
+    parameters:
+      - $ref: ../components/parameters.yaml#/Period
+    responses:
+      "200":
+        description: 期間の勤怠。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/Timesheet
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+meDailyAttendance:
+  get:
+    tags: [me]
+    operationId: getMyDailyAttendance
+    x-module: Self
+    summary: 日別の詳細を取得する
+    description: 打刻（補正を含む）、区間、計算結果、エラーを返す（UC-EM-04）。
+    parameters:
+      - $ref: ../components/parameters.yaml#/WorkDate
+    responses:
+      "200":
+        description: 日別勤怠の詳細。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/DailyAttendanceDetail
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+meSchedules:
+  get:
+    tags: [me]
+    operationId: listMySchedules
+    x-module: Self
+    summary: 自分のシフトを取得する
+    description: 公開済みの勤務予定を返す（UC-EM-05）。期間は最大62日。
+    parameters:
+      - $ref: ../components/parameters.yaml#/FromDate
+      - $ref: ../components/parameters.yaml#/ToDate
+    responses:
+      "200":
+        description: 勤務予定。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/WorkScheduleList
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+meLeave:
+  get:
+    tags: [me]
+    operationId: getMyLeave
+    x-module: Self
+    summary: 休暇の残りを取得する
+    description: 申請できる休暇種別と、種別ごとの残り、付与ロット、失効予定、年5日の進捗、時間単位の残りを返す（UC-EM-06）。取得の履歴は listMyRequests（`type=leave`）で取得する。
+    responses:
+      "200":
+        description: 休暇の状況。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/MyLeave
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+meRequests:
+  get:
+    tags: [me]
+    operationId: listMyRequests
+    x-module: Self
+    summary: 自分の申請の一覧を取得する
+    description: 新しい順に返す（EM08）。
+    parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: ../components/schemas/workflow.yaml#/RequestStatus
+      - name: type
+        in: query
+        schema:
+          $ref: ../components/schemas/workflow.yaml#/RequestType
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 申請の一覧。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/RequestSummaryList
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+  post:
+    tags: [me]
+    operationId: createMyRequest
+    x-module: Self
+    summary: 申請する
+    description: 休暇申請（UC-WF-01）または打刻修正申請（UC-WF-02）を作り、承認ルートを決めて1段目の承認者に知らせる。
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/workflow.yaml#/RequestCreate
+          examples:
+            annualLeave:
+              summary: 年次有給休暇（午前半休）
+              value:
+                type: leave
+                leave:
+                  leaveTypeId: 01J9ZK3M8Q6W2E4R5T7Y9V1H0P
+                  from: "2026-10-20"
+                  unit: amHalf
+            punchCorrection:
+              summary: 退勤の打刻漏れ
+              value:
+                type: punchCorrection
+                punchCorrection:
+                  workDate: "2026-10-06"
+                  operations:
+                    - op: add
+                      type: clockOut
+                      at: "2026-10-06T18:30:00+09:00"
+                reason: 退勤の打刻を忘れたため
+    responses:
+      "201":
+        description: 申請した。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+          Location:
+            $ref: ../components/headers.yaml#/Location
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/Request
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "409":
+        description: 締め済み（PERIOD_CLOSED）、同じ日に承認待ちの打刻修正申請がある（CORRECTION_ALREADY_PENDING）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        description: 業務規則の違反（LEAVE_BALANCE_INSUFFICIENT、LEAVE_UNIT_NOT_ALLOWED、LEAVE_NOT_WORKDAY、LEAVE_OVERLAP、LEAVE_HOURLY_CAP_EXCEEDED、CORRECTION_SEQUENCE_INVALID）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+meRequestPreview:
+  post:
+    tags: [me]
+    operationId: previewMyRequest
+    x-module: Self
+    summary: 申請を試算する
+    description: |
+      申請は作らずに、休暇の日ごとの展開と取得前後の残り、承認の段と承認者、誤りを返す（EM06、EM07）。
+      業務規則の誤り（残りの不足など）は 422 にせず、`issues` で返す。
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/workflow.yaml#/RequestCreate
+    responses:
+      "200":
+        description: 試算の結果。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/RequestPreview
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+meKioskPin:
+  put:
+    tags: [me]
+    operationId: setMyKioskPin
+    x-module: Auth
+    summary: 共有端末用の PIN を設定する
+    description: PIN を設定し、誤りの回数をリセットする（UC-AU-08）。
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/KioskPinSet
+    responses:
+      "204":
+        description: 設定した。
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "422":
+        description: 単純すぎる PIN（PIN_TOO_WEAK）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem

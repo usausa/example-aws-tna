@@ -1,0 +1,277 @@
+openapi: 3.1.0
+info:
+  title: 勤怠管理 API
+  version: 0.1.0
+  summary: テナント向けの勤怠管理 API（認証、打刻、勤怠、申請・承認、休暇、シフト、締め、設定）。
+  description: |
+    勤怠管理 SaaS のテナント向け API。アプリ（Blazor WebAssembly）と同じオリジンの CloudFront から、
+    `/auth/*` と `/api/*` を API Gateway の HTTP API に振り分ける。
+
+    - 規約（日時・時間の表し方、エラー、冪等キー、同時更新、ページング、ジョブ）は `README.md` にまとめる。
+    - 運営者の API は別の仕様（`ops/openapi.yaml`）にする。
+    - この仕様を正本にし、C# の型と Blazor 用のクライアントを生成する。
+servers:
+  - url: /
+    description: アプリと同じオリジン（CloudFront の配下）。
+security:
+  - bearerAuth: [employee]
+tags:
+  - name: auth
+    description: ログイン、トークンの更新、ログアウト、パスワード、招待、二要素認証、管理機能の再認証、共有端末の登録。
+  - name: me
+    description: 本人の打刻、勤怠、勤務予定、休暇、申請。
+  - name: requests
+    description: 申請の詳細と操作（申請者・承認者・管理者で共通）、承認待ちの一覧。
+  - name: kiosk
+    description: 共有端末での本人確認と打刻。
+  - name: admin-attendance
+    description: 管理者の勤怠の確認と補正、アラート、監査ログ、CSV の出力、ジョブ。
+  - name: admin-shifts
+    description: シフト表の作成・公開、公開後の勤務予定の変更。
+  - name: admin-closing
+    description: 月次の締めと再オープン。
+  - name: admin-leave
+    description: 有給の付与予定、手動の付与と調整、年5日の取得義務、時季指定、子の看護等休暇・介護休暇の日数。
+  - name: admin-settings
+    description: 従業員とアカウント、組織、就業ルール、勤務パターン、カレンダー、休暇種別、付与ルール、承認ルート、36協定、共有端末、テナントの設定。
+x-tagGroups:
+  - name: 従業員
+    tags: [auth, me, requests]
+  - name: 共有端末
+    tags: [kiosk]
+  - name: 管理
+    tags: [admin-attendance, admin-shifts, admin-closing, admin-leave, admin-settings]
+paths:
+  # 認証
+  /auth/v1/login:
+    $ref: paths/auth.yaml#/login
+  /auth/v1/login/mfa:
+    $ref: paths/auth.yaml#/loginMfa
+  /auth/v1/token:
+    $ref: paths/auth.yaml#/token
+  /auth/v1/logout:
+    $ref: paths/auth.yaml#/logout
+  /auth/v1/password/change:
+    $ref: paths/auth.yaml#/passwordChange
+  /auth/v1/password/initial:
+    $ref: paths/auth.yaml#/passwordInitial
+  /auth/v1/password/forgot:
+    $ref: paths/auth.yaml#/passwordForgot
+  /auth/v1/password/reset:
+    $ref: paths/auth.yaml#/passwordReset
+  /auth/v1/invitations/inspect:
+    $ref: paths/auth.yaml#/invitationInspect
+  /auth/v1/invitations/accept:
+    $ref: paths/auth.yaml#/invitationAccept
+  /auth/v1/step-up:
+    $ref: paths/auth.yaml#/stepUp
+  /auth/v1/mfa/totp/setup:
+    $ref: paths/auth.yaml#/totpSetup
+  /auth/v1/mfa/totp/confirm:
+    $ref: paths/auth.yaml#/totpConfirm
+  /auth/v1/kiosk/register:
+    $ref: paths/auth.yaml#/kioskRegister
+  /auth/v1/kiosk/token:
+    $ref: paths/auth.yaml#/kioskToken
+  # 本人
+  /api/v1/me:
+    $ref: paths/me.yaml#/me
+  /api/v1/me/today:
+    $ref: paths/me.yaml#/meToday
+  /api/v1/me/punches:
+    $ref: paths/me.yaml#/mePunches
+  /api/v1/me/timesheets/{period}:
+    $ref: paths/me.yaml#/meTimesheet
+  /api/v1/me/daily-attendances/{workDate}:
+    $ref: paths/me.yaml#/meDailyAttendance
+  /api/v1/me/schedules:
+    $ref: paths/me.yaml#/meSchedules
+  /api/v1/me/leave:
+    $ref: paths/me.yaml#/meLeave
+  /api/v1/me/requests:
+    $ref: paths/me.yaml#/meRequests
+  /api/v1/me/requests/preview:
+    $ref: paths/me.yaml#/meRequestPreview
+  /api/v1/me/kiosk-pin:
+    $ref: paths/me.yaml#/meKioskPin
+  # 申請・承認
+  /api/v1/requests/{requestId}:
+    $ref: paths/requests.yaml#/request
+  /api/v1/requests/{requestId}/actions:
+    $ref: paths/requests.yaml#/requestActions
+  /api/v1/approvals:
+    $ref: paths/requests.yaml#/approvals
+  # 共有端末
+  /api/v1/kiosk/sessions:
+    $ref: paths/kiosk.yaml#/kioskSessions
+  /api/v1/kiosk/pin:
+    $ref: paths/kiosk.yaml#/kioskPin
+  /api/v1/kiosk/punches:
+    $ref: paths/kiosk.yaml#/kioskPunches
+  # 管理: 勤怠
+  /api/v1/admin/dashboard:
+    $ref: paths/admin-attendance.yaml#/dashboard
+  /api/v1/admin/timesheets:
+    $ref: paths/admin-attendance.yaml#/timesheets
+  /api/v1/admin/employees/{employeeId}/timesheets/{period}:
+    $ref: paths/admin-attendance.yaml#/employeeTimesheet
+  /api/v1/admin/employees/{employeeId}/daily-attendances/{workDate}:
+    $ref: paths/admin-attendance.yaml#/employeeDailyAttendance
+  /api/v1/admin/employees/{employeeId}/daily-attendances/{workDate}/adjustments:
+    $ref: paths/admin-attendance.yaml#/employeeAdjustments
+  /api/v1/admin/alerts:
+    $ref: paths/admin-attendance.yaml#/alerts
+  /api/v1/admin/alerts/{alertId}/acknowledge:
+    $ref: paths/admin-attendance.yaml#/alertAcknowledge
+  /api/v1/admin/audit-logs:
+    $ref: paths/admin-attendance.yaml#/auditLogs
+  /api/v1/admin/exports:
+    $ref: paths/admin-attendance.yaml#/exports
+  /api/v1/admin/jobs:
+    $ref: paths/admin-attendance.yaml#/jobs
+  /api/v1/admin/jobs/{jobId}:
+    $ref: paths/admin-attendance.yaml#/job
+  # 管理: シフト
+  /api/v1/admin/departments/{departmentId}/shift-plans/{period}:
+    $ref: paths/admin-shifts.yaml#/shiftPlan
+  /api/v1/admin/departments/{departmentId}/shift-plans/{period}/publish:
+    $ref: paths/admin-shifts.yaml#/shiftPlanPublish
+  /api/v1/admin/departments/{departmentId}/shift-plans/{period}/csv:
+    $ref: paths/admin-shifts.yaml#/shiftPlanCsv
+  /api/v1/admin/employees/{employeeId}/schedules/{workDate}:
+    $ref: paths/admin-shifts.yaml#/employeeSchedule
+  # 管理: 締め
+  /api/v1/admin/period-closes/{period}:
+    $ref: paths/admin-closing.yaml#/periodClose
+  /api/v1/admin/period-closes/{period}/close:
+    $ref: paths/admin-closing.yaml#/periodCloseClose
+  /api/v1/admin/period-closes/{period}/reopen:
+    $ref: paths/admin-closing.yaml#/periodCloseReopen
+  # 管理: 休暇
+  /api/v1/admin/leave-grant-plans:
+    $ref: paths/admin-leave.yaml#/leaveGrantPlans
+  /api/v1/admin/leave-grant-plans/{planId}/decision:
+    $ref: paths/admin-leave.yaml#/leaveGrantPlanDecision
+  /api/v1/admin/leave-balances:
+    $ref: paths/admin-leave.yaml#/leaveBalances
+  /api/v1/admin/leave-obligations:
+    $ref: paths/admin-leave.yaml#/leaveObligations
+  /api/v1/admin/employees/{employeeId}/leave:
+    $ref: paths/admin-leave.yaml#/employeeLeave
+  /api/v1/admin/employees/{employeeId}/leave-grants:
+    $ref: paths/admin-leave.yaml#/employeeLeaveGrants
+  /api/v1/admin/employees/{employeeId}/leave-adjustments:
+    $ref: paths/admin-leave.yaml#/employeeLeaveAdjustments
+  /api/v1/admin/employees/{employeeId}/leave-designations:
+    $ref: paths/admin-leave.yaml#/employeeLeaveDesignations
+  /api/v1/admin/employees/{employeeId}/statutory-entitlements/{leaveTypeId}/{fiscalYear}:
+    $ref: paths/admin-leave.yaml#/employeeStatutoryEntitlement
+  /api/v1/admin/employees/{employeeId}/leaves-of-absence:
+    $ref: paths/admin-leave.yaml#/employeeLeavesOfAbsence
+  /api/v1/admin/employees/{employeeId}/leaves-of-absence/{leaveOfAbsenceId}:
+    $ref: paths/admin-leave.yaml#/employeeLeaveOfAbsence
+  # 管理: 設定（従業員とアカウント）
+  /api/v1/admin/employees:
+    $ref: paths/admin-settings.yaml#/employees
+  /api/v1/admin/employees/{employeeId}:
+    $ref: paths/admin-settings.yaml#/employee
+  /api/v1/admin/employees/{employeeId}/assignments:
+    $ref: paths/admin-settings.yaml#/employeeAssignments
+  /api/v1/admin/employees/{employeeId}/terminate:
+    $ref: paths/admin-settings.yaml#/employeeTerminate
+  /api/v1/admin/employees/{employeeId}/reinstate:
+    $ref: paths/admin-settings.yaml#/employeeReinstate
+  /api/v1/admin/employees/{employeeId}/roles:
+    $ref: paths/admin-settings.yaml#/employeeRoles
+  /api/v1/admin/employees/{employeeId}/account/invitation:
+    $ref: paths/admin-settings.yaml#/accountInvitation
+  /api/v1/admin/employees/{employeeId}/account/initial-password:
+    $ref: paths/admin-settings.yaml#/accountInitialPassword
+  /api/v1/admin/employees/{employeeId}/account/unlock:
+    $ref: paths/admin-settings.yaml#/accountUnlock
+  /api/v1/admin/employees/{employeeId}/account/mfa-reset:
+    $ref: paths/admin-settings.yaml#/accountMfaReset
+  /api/v1/admin/employees/{employeeId}/account/pin-reset:
+    $ref: paths/admin-settings.yaml#/accountPinReset
+  /api/v1/admin/employees/{employeeId}/account/disable:
+    $ref: paths/admin-settings.yaml#/accountDisable
+  /api/v1/admin/employee-imports:
+    $ref: paths/admin-settings.yaml#/employeeImports
+  /api/v1/admin/employee-imports/{importId}/apply:
+    $ref: paths/admin-settings.yaml#/employeeImportApply
+  # 管理: 設定（マスタ）
+  /api/v1/admin/departments:
+    $ref: paths/admin-settings.yaml#/departments
+  /api/v1/admin/departments/{departmentId}:
+    $ref: paths/admin-settings.yaml#/department
+  /api/v1/admin/employment-types:
+    $ref: paths/admin-settings.yaml#/employmentTypes
+  /api/v1/admin/employment-types/{employmentTypeId}:
+    $ref: paths/admin-settings.yaml#/employmentType
+  /api/v1/admin/work-rules:
+    $ref: paths/admin-settings.yaml#/workRules
+  /api/v1/admin/work-rules/{workRuleId}:
+    $ref: paths/admin-settings.yaml#/workRule
+  /api/v1/admin/work-rules/{workRuleId}/versions:
+    $ref: paths/admin-settings.yaml#/workRuleVersions
+  /api/v1/admin/work-rules/{workRuleId}/versions/preview:
+    $ref: paths/admin-settings.yaml#/workRuleVersionPreview
+  /api/v1/admin/work-rules/{workRuleId}/versions/{validFrom}:
+    $ref: paths/admin-settings.yaml#/workRuleVersion
+  /api/v1/admin/work-patterns:
+    $ref: paths/admin-settings.yaml#/workPatterns
+  /api/v1/admin/work-patterns/{workPatternId}:
+    $ref: paths/admin-settings.yaml#/workPattern
+  /api/v1/admin/calendars:
+    $ref: paths/admin-settings.yaml#/calendars
+  /api/v1/admin/calendars/{calendarId}/years/{year}:
+    $ref: paths/admin-settings.yaml#/calendarYear
+  /api/v1/admin/calendars/{calendarId}/years/{year}/national-holidays:
+    $ref: paths/admin-settings.yaml#/calendarNationalHolidays
+  /api/v1/admin/leave-types:
+    $ref: paths/admin-settings.yaml#/leaveTypes
+  /api/v1/admin/leave-types/{leaveTypeId}:
+    $ref: paths/admin-settings.yaml#/leaveType
+  /api/v1/admin/leave-policies:
+    $ref: paths/admin-settings.yaml#/leavePolicies
+  /api/v1/admin/leave-policies/{leavePolicyId}:
+    $ref: paths/admin-settings.yaml#/leavePolicy
+  /api/v1/admin/approval-routes:
+    $ref: paths/admin-settings.yaml#/approvalRoutes
+  /api/v1/admin/approval-routes/{approvalRouteId}:
+    $ref: paths/admin-settings.yaml#/approvalRoute
+  /api/v1/admin/overtime-agreements:
+    $ref: paths/admin-settings.yaml#/overtimeAgreements
+  /api/v1/admin/overtime-agreements/{agreementId}:
+    $ref: paths/admin-settings.yaml#/overtimeAgreement
+  /api/v1/admin/devices:
+    $ref: paths/admin-settings.yaml#/devices
+  /api/v1/admin/devices/{deviceId}/registration-code:
+    $ref: paths/admin-settings.yaml#/deviceRegistrationCode
+  /api/v1/admin/devices/{deviceId}/revoke:
+    $ref: paths/admin-settings.yaml#/deviceRevoke
+  /api/v1/admin/tenant-settings:
+    $ref: paths/admin-settings.yaml#/tenantSettings
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        自前で発行するアクセストークン（RS256、有効期間15分）。HTTP API の JWT オーソライザーで、署名・発行者・対象者・期限とスコープを確認する。
+        操作の `security` に書いた値は、必要なスコープを表す。
+
+        - `employee`: 従業員としてログインした。
+        - `admin`: 管理機能の再認証が有効（`employee` と一緒に入る）。テナント管理者だけの操作は `x-required-roles` に書き、関数で確認する。
+        - `kiosk`: 登録した共有端末。
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: __Secure-tna_rt
+      description: リフレッシュトークン（`Path=/auth`、HttpOnly）。CSRF 対策として `X-TNA-Request` ヘッダーも必須。
+    deviceCookie:
+      type: apiKey
+      in: cookie
+      name: __Secure-tna_device
+      description: 共有端末の資格情報（`Path=/auth/v1/kiosk`、HttpOnly）。CSRF 対策として `X-TNA-Request` ヘッダーも必須。

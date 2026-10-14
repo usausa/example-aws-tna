@@ -1,0 +1,108 @@
+# 共通のパラメータ
+IdempotencyKey:
+  name: Idempotency-Key
+  in: header
+  required: true
+  description: |
+    冪等キー。画面が操作ごとに作り（UUID または ULID）、再送でも同じ値を送る。
+    同じキーの再送には最初の結果を返す。同じキーで内容が違う要求は 422（IDEMPOTENCY_KEY_REUSED）、最初の要求の処理中に届いた再送は 409（IDEMPOTENCY_KEY_IN_PROGRESS）。キーは24時間保持する。
+  schema:
+    type: string
+    minLength: 16
+    maxLength: 64
+IfMatch:
+  name: If-Match
+  in: header
+  required: true
+  description: 取得時の ETag。一致しなければ 412（VERSION_CONFLICT）、省略すると 428。
+  schema:
+    type: string
+CsrfHeader:
+  name: X-TNA-Request
+  in: header
+  required: true
+  description: Cookie で認証する経路の CSRF 対策。値は常に `1`。
+  schema:
+    type: string
+    const: "1"
+Limit:
+  name: limit
+  in: query
+  description: 1回に返す件数（既定 50、最大 100）。
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 50
+NextToken:
+  name: nextToken
+  in: query
+  description: 前の応答の `nextToken`。続きを取得するときに指定する。有効期限は1時間で、期限を過ぎたものや、ほかの一覧・ほかの絞り込みの条件で得たものは 400（`VALIDATION_FAILED`）になる。そのときは最初のページから取り直す。
+  schema:
+    type: string
+Period:
+  name: period
+  in: path
+  required: true
+  description: 給与の締め期間の ID（期間の末日が属する年月）。
+  schema:
+    $ref: schemas/common.yaml#/PeriodId
+WorkDate:
+  name: workDate
+  in: path
+  required: true
+  description: 勤務日。
+  schema:
+    type: string
+    format: date
+EmployeeId:
+  name: employeeId
+  in: path
+  required: true
+  schema:
+    $ref: schemas/common.yaml#/Ulid
+DepartmentId:
+  name: departmentId
+  in: path
+  required: true
+  schema:
+    $ref: schemas/common.yaml#/Ulid
+RequestId:
+  name: requestId
+  in: path
+  required: true
+  schema:
+    $ref: schemas/common.yaml#/Ulid
+JobId:
+  name: jobId
+  in: path
+  required: true
+  schema:
+    $ref: schemas/common.yaml#/Ulid
+DepartmentIdQuery:
+  name: departmentId
+  in: query
+  description: 部署で絞り込む。
+  schema:
+    $ref: schemas/common.yaml#/Ulid
+IncludeDescendants:
+  name: includeDescendants
+  in: query
+  description: 配下の部署を含めるか（既定 true）。
+  schema:
+    type: boolean
+    default: true
+FromDate:
+  name: from
+  in: query
+  description: 期間の開始日（その日を含む）。
+  schema:
+    type: string
+    format: date
+ToDate:
+  name: to
+  in: query
+  description: 期間の終了日（その日を含む）。期間は最大62日。
+  schema:
+    type: string
+    format: date

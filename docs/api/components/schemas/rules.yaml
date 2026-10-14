@@ -1,0 +1,676 @@
+# 就業ルール・勤務パターン・カレンダー・36協定・承認ルート・設定の型
+WorkSystem:
+  type: string
+  enum: [fixed, shift, flex, monthlyVariable]
+ExemptionType:
+  type: string
+  enum: [none, managerial, discretionary, deemedOutside]
+LegalHolidayRule:
+  type: object
+  description: 法定休日の決め方（勤怠計算仕様 §6.4）。
+  required: [type]
+  properties:
+    type:
+      type: string
+      enum: [fixedWeekday, byCalendarOrSchedule, lastHolidayOfWeek, fourWeeks]
+    weekday:
+      $ref: common.yaml#/Weekday
+      description: "`fixedWeekday` のときの曜日。"
+    fourWeeksStartDate:
+      type: string
+      format: date
+      description: "`fourWeeks` のときの起算日。"
+TimeWindow:
+  type: object
+  required: [startMinute, endMinute]
+  properties:
+    weekday:
+      $ref: common.yaml#/Weekday
+      description: 省略するとすべての曜日。
+    startMinute:
+      $ref: common.yaml#/MinuteOfDay
+    endMinute:
+      $ref: common.yaml#/MinuteOfDay
+WeeklyPatternEntry:
+  type: object
+  description: 固定時間制の曜日ごとの予定。勤務パターンか休日の種類のどちらか。
+  properties:
+    workPatternId:
+      $ref: common.yaml#/Ulid
+    dayType:
+      $ref: common.yaml#/DayType
+WorkRuleSettings:
+  type: object
+  description: 就業ルールの版の設定（ドメインモデル §4）。
+  required: [workSystem, exemptionType, weekStartDay, statutoryWeeklyMinutes, legalHolidayRule, breakPolicy, monthlyRounding, offsetLateWithOvertime]
+  properties:
+    workSystem:
+      $ref: "#/WorkSystem"
+    exemptionType:
+      $ref: "#/ExemptionType"
+    deemedMinutes:
+      type:
+        - integer
+        - "null"
+      minimum: 0
+    deemedNonStatutoryHolidayCounting:
+      type: string
+      enum: [actual, deemed]
+      default: actual
+    weekStartDay:
+      $ref: common.yaml#/Weekday
+    statutoryWeeklyMinutes:
+      type: integer
+      enum: [2400, 2640]
+    legalHolidayRule:
+      $ref: "#/LegalHolidayRule"
+    breakPolicy:
+      type: string
+      enum: [punched, scheduleWindow, byDuration]
+      default: scheduleWindow
+    monthlyRounding:
+      type: string
+      enum: [none, halfHour]
+      default: none
+    offsetLateWithOvertime:
+      type: boolean
+      default: false
+    fixed:
+      type:
+        - object
+        - "null"
+      description: 固定時間制の設定。
+      properties:
+        weeklyPattern:
+          type: object
+          required: [sunday, monday, tuesday, wednesday, thursday, friday, saturday]
+          properties:
+            sunday:
+              $ref: "#/WeeklyPatternEntry"
+            monday:
+              $ref: "#/WeeklyPatternEntry"
+            tuesday:
+              $ref: "#/WeeklyPatternEntry"
+            wednesday:
+              $ref: "#/WeeklyPatternEntry"
+            thursday:
+              $ref: "#/WeeklyPatternEntry"
+            friday:
+              $ref: "#/WeeklyPatternEntry"
+            saturday:
+              $ref: "#/WeeklyPatternEntry"
+        calendarId:
+          $ref: common.yaml#/Ulid
+    shift:
+      type:
+        - object
+        - "null"
+      description: シフト制・1か月単位の変形の設定。
+      properties:
+        allowedWorkPatternIds:
+          type: array
+          items:
+            $ref: common.yaml#/Ulid
+        unscheduledDayType:
+          $ref: common.yaml#/DayType
+    flex:
+      type:
+        - object
+        - "null"
+      description: フレックスの設定（清算期間は給与の締め期間と同じ1か月）。
+      properties:
+        contractualTotal:
+          type: object
+          required: [mode]
+          properties:
+            mode:
+              type: string
+              enum: [fixed, perScheduledDay]
+            minutes:
+              type: integer
+              description: "`fixed` のときの総労働時間。"
+        standardDailyMinutes:
+          type: integer
+          minimum: 1
+        coreTimes:
+          type: array
+          items:
+            $ref: "#/TimeWindow"
+        flexibleTimes:
+          type: array
+          items:
+            $ref: "#/TimeWindow"
+        statutoryLimitMode:
+          type: string
+          enum: [standard, fullWeekendSpecial]
+        shortageHandling:
+          type: string
+          enum: [carryOver, deduct]
+WorkRuleVersion:
+  type: object
+  required: [versionId, validFrom, settings]
+  properties:
+    versionId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    validFrom:
+      type: string
+      format: date
+    settings:
+      $ref: "#/WorkRuleSettings"
+    createdAt:
+      type: string
+      format: date-time
+      readOnly: true
+WorkRule:
+  type: object
+  required: [workRuleId, code, name, versions]
+  properties:
+    workRuleId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    code:
+      type: string
+    name:
+      type: string
+    versions:
+      type: array
+      items:
+        $ref: "#/WorkRuleVersion"
+    etag:
+      $ref: common.yaml#/ETagValue
+WorkRuleCreate:
+  type: object
+  required: [code, name, firstVersion]
+  properties:
+    code:
+      type: string
+    name:
+      type: string
+    firstVersion:
+      type: object
+      required: [validFrom, settings]
+      properties:
+        validFrom:
+          type: string
+          format: date
+        settings:
+          $ref: "#/WorkRuleSettings"
+WorkRuleVersionCreate:
+  type: object
+  required: [validFrom, settings]
+  properties:
+    validFrom:
+      type: string
+      format: date
+      description: 締めていない最初の期間の初日以降。
+    settings:
+      $ref: "#/WorkRuleSettings"
+WorkRuleVersionReplace:
+  type: object
+  description: 版の置き換え（施行日は経路で示す）。
+  required: [settings]
+  properties:
+    settings:
+      $ref: "#/WorkRuleSettings"
+WorkRuleImpact:
+  type: object
+  description: 新しい版の影響（previewWorkRuleVersion の結果、または作成の結果）。
+  required: [employeeCount, recalculationFrom]
+  properties:
+    employeeCount:
+      type: integer
+    recalculationFrom:
+      type: string
+      format: date
+    jobId:
+      $ref: common.yaml#/NullableUlid
+      description: 再計算のジョブ（版を作ったときだけ返す）。
+HalfDayDefinition:
+  type: object
+  required: [leaveMinutes]
+  properties:
+    leaveMinutes:
+      $ref: common.yaml#/Minutes
+    workStartMinute:
+      $ref: common.yaml#/MinuteOfDay
+      description: 午前半休の日の勤務の開始。
+    workEndMinute:
+      $ref: common.yaml#/MinuteOfDay
+      description: 午後半休の日の勤務の終了。
+WorkPattern:
+  type: object
+  required: [workPatternId, code, name, startMinute, endMinute, breaks, status]
+  properties:
+    workPatternId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    code:
+      type: string
+      maxLength: 10
+      description: シフト表の CSV で使う略号。
+    name:
+      type: string
+    startMinute:
+      $ref: common.yaml#/MinuteOfDay
+    endMinute:
+      $ref: common.yaml#/MinuteOfDay
+    breaks:
+      type: array
+      items:
+        $ref: attendance.yaml#/Break
+    scheduledMinutes:
+      $ref: common.yaml#/Minutes
+      readOnly: true
+    amHalfDay:
+      oneOf:
+        - $ref: "#/HalfDayDefinition"
+        - type: "null"
+    pmHalfDay:
+      oneOf:
+        - $ref: "#/HalfDayDefinition"
+        - type: "null"
+    status:
+      type: string
+      enum: [active, inactive]
+    etag:
+      $ref: common.yaml#/ETagValue
+Calendar:
+  type: object
+  required: [calendarId, name]
+  properties:
+    calendarId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    name:
+      type: string
+CalendarYear:
+  type: object
+  description: 年ごとの例外の日（休日や祝日、休日の出勤日）。載っていない日は就業ルールの曜日の予定に従う。
+  required: [calendarId, year, days]
+  properties:
+    calendarId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    year:
+      type: integer
+    days:
+      type: array
+      items:
+        type: object
+        required: [date, dayType]
+        properties:
+          date:
+            type: string
+            format: date
+          dayType:
+            $ref: common.yaml#/DayType
+          name:
+            type: string
+            description: 祝日名など。
+    etag:
+      $ref: common.yaml#/ETagValue
+OvertimeAgreement:
+  type: object
+  description: 36協定。
+  required: [agreementId, name, scope, validFrom, validTo, startDate, monthlyLimitMinutes, annualLimitMinutes, specialClause, alertThresholdPercent]
+  properties:
+    agreementId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    name:
+      type: string
+    scope:
+      type: object
+      description: 対象。全社、部署（配下を含む）、雇用区分。部署と雇用区分の両方を指定すると、両方に当てはまる人。従業員には、当てはまる協定のうち対象の細かいもの（両方 ＞ 部署（近い部署が先）＞ 雇用区分 ＞ 全社）を1つ当てはめる。
+      properties:
+        all:
+          type: boolean
+        departmentIds:
+          type: array
+          items:
+            $ref: common.yaml#/Ulid
+        employmentTypeIds:
+          type: array
+          items:
+            $ref: common.yaml#/Ulid
+    validFrom:
+      type: string
+      format: date
+    validTo:
+      type: string
+      format: date
+    startDate:
+      type: string
+      format: date
+      description: 1年の起算日。協定の月もここから数える。
+    monthlyLimitMinutes:
+      type: integer
+      default: 2700
+    annualLimitMinutes:
+      type: integer
+      default: 21600
+    specialClause:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        monthlyLimitWithHolidayMinutes:
+          type: integer
+          exclusiveMaximum: 6000
+          description: 時間外＋休日労働の月の上限（100時間未満）。
+        annualLimitMinutes:
+          type: integer
+          maximum: 43200
+        maxTimesExceedingMonthly:
+          type: integer
+          maximum: 6
+    alertThresholdPercent:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 80
+    etag:
+      $ref: common.yaml#/ETagValue
+ApproverRule:
+  type: object
+  description: 承認者の決め方。`type` で分ける。
+  required: [type]
+  properties:
+    type:
+      type: string
+      enum: [departmentManager, specificEmployees, attendanceAdmins]
+  discriminator:
+    propertyName: type
+    mapping:
+      departmentManager: "#/ApproverRuleDepartmentManager"
+      specificEmployees: "#/ApproverRuleSpecificEmployees"
+      attendanceAdmins: "#/ApproverRuleAttendanceAdmins"
+ApproverRuleDepartmentManager:
+  description: 申請者の部署の所属長（`type` は `departmentManager`）。
+  allOf:
+    - $ref: "#/ApproverRule"
+    - type: object
+      required: [levelsUp]
+      properties:
+        levelsUp:
+          type: integer
+          minimum: 0
+          description: 申請者の部署から何階層上の所属長か（0 は自部署）。
+ApproverRuleSpecificEmployees:
+  description: 指定した従業員（`type` は `specificEmployees`）。
+  allOf:
+    - $ref: "#/ApproverRule"
+    - type: object
+      required: [employeeIds]
+      properties:
+        employeeIds:
+          type: array
+          minItems: 1
+          items:
+            $ref: common.yaml#/Ulid
+ApproverRuleAttendanceAdmins:
+  description: 申請者を管理範囲に含む勤怠管理者（`type` は `attendanceAdmins`）。
+  allOf:
+    - $ref: "#/ApproverRule"
+    # 追加の項目はない。空のオブジェクトを書かないと、生成ツールによっては派生クラスが作られない。
+    - type: object
+      properties: {}
+ApprovalRoute:
+  type: object
+  required: [approvalRouteId, name, isDefault, appliesTo, steps]
+  properties:
+    approvalRouteId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    name:
+      type: string
+    isDefault:
+      type: boolean
+    appliesTo:
+      type: object
+      properties:
+        requestTypes:
+          type: array
+          items:
+            $ref: workflow.yaml#/RequestType
+        departmentIds:
+          type: array
+          items:
+            $ref: common.yaml#/Ulid
+        employmentTypeIds:
+          type: array
+          items:
+            $ref: common.yaml#/Ulid
+    steps:
+      type: array
+      minItems: 1
+      maxItems: 5
+      items:
+        type: object
+        required: [order, approverRule]
+        properties:
+          order:
+            type: integer
+            minimum: 1
+            maximum: 5
+          approverRule:
+            $ref: "#/ApproverRule"
+    etag:
+      $ref: common.yaml#/ETagValue
+ScheduleChangeReason:
+  type: object
+  required: [code, name, ruleBased]
+  properties:
+    code:
+      type: string
+    name:
+      type: string
+    ruleBased:
+      type: boolean
+      description: 就業規則に定める変更事由に当たるか。
+TenantSettings:
+  type: object
+  description: テナントの設定（UC-SE-14）。
+  required: [tenantCode, name, timeZone, dayBoundaryMinute, payrollClosingDay, wagePaymentDay, punchAcceptance, clientTimeSkewToleranceMinutes, locationTracking, missedPunchNotifyMinute, csvDefaults, retentionExtensionYears, scheduleChangeReasons]
+  properties:
+    tenantCode:
+      type: string
+      readOnly: true
+    name:
+      type: string
+    timeZone:
+      type: string
+      readOnly: true
+    dayBoundaryMinute:
+      type: integer
+      minimum: 0
+      maximum: 1439
+      default: 300
+    payrollClosingDay:
+      type: integer
+      minimum: 0
+      maximum: 28
+      description: 給与の締め日。0 は末日。
+    wagePaymentDay:
+      type: object
+      required: [monthOffset, day]
+      properties:
+        monthOffset:
+          type: integer
+          minimum: 0
+          maximum: 2
+          description: 締め日の何か月後か（翌月払いなら 1）。
+        day:
+          type: integer
+          minimum: 0
+          maximum: 28
+          description: 支払日。0 は末日。
+    punchAcceptance:
+      type: object
+      required: [daysAfterWorkDate, untilMinute]
+      properties:
+        daysAfterWorkDate:
+          type: integer
+          minimum: 0
+          maximum: 7
+          default: 1
+        untilMinute:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          default: 1439
+    clientTimeSkewToleranceMinutes:
+      type: integer
+      minimum: 1
+      default: 5
+    locationTracking:
+      $ref: "#/LocationTrackingSetting"
+    missedPunchNotifyMinute:
+      type: integer
+      minimum: 0
+      maximum: 1439
+      default: 480
+      description: 打刻漏れなどを知らせる時刻（0:00 からの分。既定 8:00）。
+    csvDefaults:
+      $ref: common.yaml#/CsvFormat
+    retentionExtensionYears:
+      type: integer
+      minimum: 0
+      maximum: 10
+      default: 0
+    scheduleChangeReasons:
+      type: array
+      items:
+        $ref: "#/ScheduleChangeReason"
+    etag:
+      $ref: common.yaml#/ETagValue
+Device:
+  type: object
+  description: 共有端末。
+  required: [deviceId, name, departmentId, status, createdAt]
+  properties:
+    deviceId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    name:
+      type: string
+    departmentId:
+      $ref: common.yaml#/Ulid
+    status:
+      type: string
+      enum: [pendingRegistration, active, revoked]
+    registeredAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+    lastUsedAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+    createdAt:
+      type: string
+      format: date-time
+DeviceCreate:
+  type: object
+  required: [name, departmentId]
+  properties:
+    name:
+      type: string
+      maxLength: 50
+    departmentId:
+      $ref: common.yaml#/Ulid
+DeviceRegistrationCode:
+  type: object
+  required: [device, expiresAt]
+  properties:
+    device:
+      $ref: "#/Device"
+    registrationCode:
+      type:
+        - string
+        - "null"
+      pattern: "^[A-Z0-9]{8}$"
+      description: 登録コード（10分有効、1回限り）。端末の登録（createDevice）を同じ冪等キーで再送したときは null になるため、発行し直す（reissueDeviceRegistrationCode）。
+    expiresAt:
+      type: string
+      format: date-time
+LocationTrackingSetting:
+  type: object
+  description: 打刻時の位置情報の記録。
+  required: [enabled]
+  properties:
+    enabled:
+      type: boolean
+    purposeText:
+      type:
+        - string
+        - "null"
+      maxLength: 500
+      description: 従業員に示す利用目的の文。
+WorkRuleVersionCreated:
+  type: object
+  description: 作った版と影響。
+  required: [version, impact]
+  properties:
+    version:
+      $ref: "#/WorkRuleVersion"
+    impact:
+      $ref: "#/WorkRuleImpact"
+WorkRuleList:
+  type: object
+  description: 就業ルールの一覧（版を含む）。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/WorkRule"
+WorkPatternList:
+  type: object
+  description: 勤務パターンの一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/WorkPattern"
+CalendarList:
+  type: object
+  description: 会社カレンダーの一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Calendar"
+ApprovalRouteList:
+  type: object
+  description: 承認ルートの一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/ApprovalRoute"
+OvertimeAgreementList:
+  type: object
+  description: 36協定の一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/OvertimeAgreement"
+DeviceList:
+  type: object
+  description: 共有端末の一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Device"

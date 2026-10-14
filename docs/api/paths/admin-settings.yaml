@@ -1,0 +1,1671 @@
+# 管理: 設定（/api/v1/admin）。bearerAuth の admin スコープ。
+# 更新は `x-required-roles: [tenantAdmin]` の操作だけテナント管理者に限る（勤怠管理者は閲覧のみ）。
+# PATCH は JSON Merge Patch（application/merge-patch+json）。画面は編集したリソース全体を送ってよい（required は作成時の条件）。
+employees:
+  get:
+    tags: [admin-settings]
+    operationId: listEmployees
+    x-module: AdminSettings
+    summary: 従業員の一覧を取得する
+    description: 管理範囲の従業員を返す（テナント管理者はすべて）（SE01）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+      - $ref: ../components/parameters.yaml#/IncludeDescendants
+      - name: status
+        in: query
+        schema:
+          $ref: ../components/schemas/organization.yaml#/EmployeeStatus
+      - name: q
+        in: query
+        description: 社員番号・氏名・かなの部分一致（かなは、ひらがなと半角のカナも全角カタカナにそろえて比べる）。
+        schema:
+          type: string
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 従業員の一覧（管理範囲内）。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmployeeList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createEmployee
+    x-module: AdminSettings
+    summary: 従業員を登録する
+    description: 従業員を登録し、メールアドレスがあれば招待メールを送る（UC-SE-01）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/EmployeeCreate
+    responses:
+      "201":
+        description: 登録した。初期 PIN を発行した場合は、この応答でだけ返す。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmployeeCreated
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 社員番号・メールアドレスの重複（EMPLOYEE_CODE_DUPLICATED、EMAIL_DUPLICATED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+employee:
+  get:
+    tags: [admin-settings]
+    operationId: getEmployee
+    x-module: AdminSettings
+    summary: 従業員を取得する
+    description: 基本情報、現在の条件、アカウント、ロールを返す（SE01）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "200":
+        description: 従業員。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Employee
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+  patch:
+    tags: [admin-settings]
+    operationId: updateEmployee
+    x-module: AdminSettings
+    summary: 従業員の基本情報を変更する
+    description: |
+      社員番号・氏名・かな・メールアドレス・入社日を変える。所属などの条件は assignments で変える（UC-SE-01）。
+      入社日は、旧い入社日と新しい入社日の間に勤怠・休暇・申請の記録がなく、その間が締め済みの期間にかからず、有給をまだ付与して
+      いない場合だけ変えられる（HIRE_DATE_LOCKED。UC-SE-16）。最初の条件の適用日も入社日に合わせて動かす。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/EmployeePatch
+    responses:
+      "200":
+        description: 変更後の従業員。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Employee
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+  delete:
+    tags: [admin-settings]
+    operationId: deleteEmployee
+    x-module: Auth
+    summary: 従業員を削除する
+    description: |
+      誤って登録した従業員を消す（UC-SE-15）。勤怠・休暇・申請の記録がなく、ログインしたことがなく、ロールを持たず、部署の
+      所属長や承認ルートの承認者に指定されていない従業員だけ消せる（EMPLOYEE_HAS_RECORDS）。従業員、条件の履歴、社員番号と
+      メールアドレスの一意性の項目、アカウントを1つのトランザクションで消し、監査ログに残す。アカウントを消すため、アカウントの
+      操作と同じく認証の処理が受け持つ。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    responses:
+      "204":
+        description: 削除した。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        description: 記録や指定があるため削除できない（EMPLOYEE_HAS_RECORDS）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+employeeAssignments:
+  get:
+    tags: [admin-settings]
+    operationId: listEmployeeAssignments
+    x-module: AdminSettings
+    summary: 従業員の条件の履歴を取得する
+    description: 適用日ごとの条件（所属、雇用区分、就業ルールなど）を返す（UC-SE-02）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "200":
+        description: 条件の履歴（古い順）。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmployeeAssignmentList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+  post:
+    tags: [admin-settings]
+    operationId: createEmployeeAssignment
+    x-module: AdminSettings
+    summary: 従業員の条件を変更する
+    description: 適用日からの新しい条件を登録し、適用日以降の締めていない勤務日を再計算する（UC-SE-02）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/EmployeeAssignment
+    responses:
+      "201":
+        description: 登録した条件。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmployeeAssignment
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 適用日が締め済みの期間にかかる（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+employeeTerminate:
+  post:
+    tags: [admin-settings]
+    operationId: terminateEmployee
+    x-module: AdminSettings
+    summary: 従業員を退職させる
+    description: |
+      退職日を登録する。退職日の翌日から打刻と申請を受け付けず、退職日の終わりにアカウントを無効にする（UC-SE-03）。登録した
+      退職日は、退職の処理（退職日の翌日 0:01。UC-BA-11）の前なら、同じ操作で変えられる。新しい退職日と前の退職日は、
+      入社日以降で、締めていない期間の日であること（TERMINATION_LOCKED）。退職を処理した後は変えられない（TERMINATION_LOCKED。
+      取り消して（reinstateEmployee）から登録し直す）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/TerminateRequest
+    responses:
+      "200":
+        description: 退職を登録した従業員。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Employee
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+employeeReinstate:
+  post:
+    tags: [admin-settings]
+    operationId: reinstateEmployee
+    x-module: Auth
+    summary: 退職を取り消す
+    description: |
+      登録した退職日を取り消す（UC-SE-03）。退職の処理（退職日の翌日 0:01。UC-BA-11）の後も、退職日が締めていない期間に
+      あるうちは取り消せる（TERMINATION_LOCKED）。処理の後なら、状態を在籍（休業の期間なら休業）に戻し、名簿と記録の保存期間を
+      戻し、社員番号とメールアドレス（ログインID）の一意性の項目を付け直し（ほかの従業員が使っていれば EMPLOYEE_CODE_DUPLICATED、
+      EMAIL_DUPLICATED）、退職の処理で無効にしたアカウントを有効に戻す。取り下げた休暇申請は戻らない。退職を処理した後に
+      退職日を変えるときは、取り消してから登録し直す。アカウントを戻すため、アカウントの操作と同じく認証の処理が受け持つ。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    responses:
+      "200":
+        description: 退職を取り消した従業員。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Employee
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+employeeRoles:
+  put:
+    tags: [admin-settings]
+    operationId: updateEmployeeRoles
+    x-module: AdminSettings
+    summary: ロールと管理範囲を設定する
+    description: テナント管理者を0人にする変更はできない（UC-SE-05）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/RolesUpdate
+    responses:
+      "200":
+        description: 設定したロール。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Roles
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: テナント管理者がいなくなる（LAST_TENANT_ADMIN）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+accountInvitation:
+  post:
+    tags: [admin-settings]
+    operationId: resendInvitation
+    x-module: Auth
+    summary: 招待を再送する
+    description: 新しい招待のリンクを送る。古いリンクは無効になる（UC-AU-10）。勤怠管理者も範囲内なら行える。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "202":
+        description: 送信を受け付けた。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: メールアドレスがない、または有効なアカウント（ACCOUNT_STATE_INVALID）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+accountInitialPassword:
+  post:
+    tags: [admin-settings]
+    operationId: issueInitialPassword
+    x-module: Auth
+    summary: 初期パスワードを発行する
+    description: メールのない従業員向け。応答で一度だけ返す。初回ログインで変更させる（UC-AU-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "200":
+        description: 初期パスワード。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/OneTimeSecret
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+accountUnlock:
+  post:
+    tags: [admin-settings]
+    operationId: unlockAccount
+    x-module: Auth
+    summary: アカウントのロックを解除する
+    description: |
+      ログインの失敗によるロック（連続100回の失敗の無効化を含む）と、管理者による無効化を解除する（UC-AU-10）。管理者による
+      無効化は、退職していない従業員だけ戻せる（ACCOUNT_STATE_INVALID）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "204":
+        description: 解除した。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+accountMfaReset:
+  post:
+    tags: [admin-settings]
+    operationId: resetMfa
+    x-module: Auth
+    summary: TOTP を解除する
+    description: 紛失時に使う。自分自身には使えない（UC-AU-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "204":
+        description: 解除した。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+accountPinReset:
+  post:
+    tags: [admin-settings]
+    operationId: resetPin
+    x-module: Auth
+    summary: 共有端末用の PIN をリセットする
+    description: 初期 PIN を発行し、応答で一度だけ返す。初回の打刻で本人が変える。勤怠管理者も範囲内なら行える（UC-AU-10）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "200":
+        description: 初期 PIN。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/OneTimeSecret
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+accountDisable:
+  post:
+    tags: [admin-settings]
+    operationId: disableAccount
+    x-module: Auth
+    summary: アカウントを無効にする
+    description: すべてのセッションを失効させ、ログインと共有端末での打刻をできなくする（UC-AU-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "204":
+        description: 無効にした。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+employeeImports:
+  post:
+    tags: [admin-settings]
+    operationId: previewEmployeeImport
+    x-module: AdminSettings
+    summary: 従業員の CSV を検証する
+    description: CSV（CSV の形式 §3.1）を検証し、新規・更新・誤りを返す（UC-SE-04）。この時点では反映しない。誤りがなければ `importId` を返す（1時間有効）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: encoding
+        in: query
+        description: 文字コード（既定 `utf8`）。
+        schema:
+          $ref: ../components/schemas/common.yaml#/CsvImportEncoding
+    requestBody:
+      required: true
+      content:
+        text/csv:
+          schema:
+            type: string
+            format: binary
+            description: CSV のバイト列。文字コードは `encoding` で示す。上限は 4MB（4,194,304 バイト。Base64 で受け取ると関数の上限 6MB に近づくため）。
+    responses:
+      "200":
+        description: 検証の結果。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/ImportResult
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "413":
+        description: 大きすぎる（PAYLOAD_TOO_LARGE。4MB 超、または10,000行超）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+employeeImportApply:
+  post:
+    tags: [admin-settings]
+    operationId: applyEmployeeImport
+    x-module: AdminSettings
+    summary: 従業員の CSV を反映する
+    description: |
+      検証済みの取込を非同期のジョブで反映する。新規の従業員に招待メールを送るかを選べる（UC-SE-04）。結果は、ジョブ（getJob）の
+      `result.summary` に、新規・更新・失敗の件数と、失敗した行（行番号と理由）を返す。結果のファイルは作らない。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: importId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/EmployeeImportApplyRequest
+    responses:
+      "202":
+        description: 受け付けた。
+        headers:
+          Location:
+            $ref: ../components/headers.yaml#/Location
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Job
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "410":
+        description: 検証の結果の期限切れ（IMPORT_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+departments:
+  get:
+    tags: [admin-settings]
+    operationId: listDepartments
+    x-module: AdminSettings
+    summary: 部署の一覧を取得する
+    description: すべての部署を返す（UC-SE-06）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: すべての部署（ツリーは parentId で組み立てる）。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/DepartmentList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createDepartment
+    x-module: AdminSettings
+    summary: 部署を登録する
+    description: 部署を登録する。親の部署と所属長を指定する（UC-SE-06）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/Department
+    responses:
+      "201":
+        description: 登録した部署。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Department
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+department:
+  patch:
+    tags: [admin-settings]
+    operationId: updateDepartment
+    x-module: AdminSettings
+    summary: 部署を変更する
+    description: |
+      所属している従業員か、有効な配下の部署がある部署は無効にできない（DEPARTMENT_IN_USE）。自分自身や配下の部署を親にできない
+      （DEPARTMENT_PARENT_INVALID）（UC-SE-06）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/Department
+    responses:
+      "200":
+        description: 変更後の部署。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/Department
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+      "422":
+        description: 自分自身や配下の部署を親にした（DEPARTMENT_PARENT_INVALID）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+employmentTypes:
+  get:
+    tags: [admin-settings]
+    operationId: listEmploymentTypes
+    x-module: AdminSettings
+    summary: 雇用区分の一覧を取得する
+    description: 雇用区分を返す（UC-SE-06）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 雇用区分。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmploymentTypeList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createEmploymentType
+    x-module: AdminSettings
+    summary: 雇用区分を登録する
+    description: 雇用区分を登録する。既定の就業ルールと付与ルールを指定する（UC-SE-06）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/EmploymentType
+    responses:
+      "201":
+        description: 登録した雇用区分。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmploymentType
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+employmentType:
+  patch:
+    tags: [admin-settings]
+    operationId: updateEmploymentType
+    x-module: AdminSettings
+    summary: 雇用区分を変更する
+    description: いまの条件で使っている従業員がいる雇用区分は無効にできない（EMPLOYMENT_TYPE_IN_USE。UC-SE-06）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: employmentTypeId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/organization.yaml#/EmploymentType
+    responses:
+      "200":
+        description: 変更後の雇用区分。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/organization.yaml#/EmploymentType
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+workRules:
+  get:
+    tags: [admin-settings]
+    operationId: listWorkRules
+    x-module: AdminSettings
+    summary: 就業ルールの一覧を取得する
+    description: 就業ルールと版を返す（UC-SE-07）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 就業ルール（版を含む）。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkRuleList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createWorkRule
+    x-module: AdminSettings
+    summary: 就業ルールを登録する
+    description: 就業ルールと最初の版を登録する（UC-SE-07）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/WorkRuleCreate
+    responses:
+      "201":
+        description: 登録した就業ルール。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkRule
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+workRule:
+  get:
+    tags: [admin-settings]
+    operationId: getWorkRule
+    x-module: AdminSettings
+    summary: 就業ルールを取得する
+    description: 就業ルールと版の一覧を返す（UC-SE-07）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: workRuleId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+    responses:
+      "200":
+        description: 就業ルール。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkRule
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+workRuleVersionPreview:
+  post:
+    tags: [admin-settings]
+    operationId: previewWorkRuleVersion
+    x-module: AdminSettings
+    summary: 就業ルールの新しい版の影響を確認する
+    description: 版は作らずに、影響（対象の従業員の数、再計算の開始日）と入力の誤りを返す（UC-SE-07）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: workRuleId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/WorkRuleVersionCreate
+    responses:
+      "200":
+        description: 影響。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkRuleImpact
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        description: 施行日が締め済みの期間にかかる（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+workRuleVersions:
+  post:
+    tags: [admin-settings]
+    operationId: createWorkRuleVersion
+    x-module: AdminSettings
+    summary: 就業ルールの新しい版を作る
+    description: |
+      施行日（締めていない最初の期間の初日以降）を指定して新しい版を作り、施行日以降の締めていない勤務日の再計算を予約する（UC-SE-07）。
+      画面は先に previewWorkRuleVersion で影響を示し、確認を得てから呼ぶ。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: workRuleId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/WorkRuleVersionCreate
+    responses:
+      "201":
+        description: 作った版と影響。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkRuleVersionCreated
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 施行日が締め済みの期間にかかる（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+workRuleVersion:
+  put:
+    tags: [admin-settings]
+    operationId: replaceWorkRuleVersion
+    x-module: AdminSettings
+    summary: 就業ルールの版を置き換える
+    description: |
+      施行日が締めていない期間にある版を、同じ施行日のまま新しい設定に置き換え、施行日以降の締めていない勤務日の再計算を予約する
+      （UC-SE-07）。変更前後を監査ログに残す。画面は先に previewWorkRuleVersion で影響を示し、確認を得てから呼ぶ。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: workRuleId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: validFrom
+        in: path
+        required: true
+        description: 置き換える版の施行日。
+        schema:
+          type: string
+          format: date
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/WorkRuleVersionReplace
+    responses:
+      "200":
+        description: 置き換えた版と影響。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkRuleVersionCreated
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        description: 施行日が締め済みの期間にかかる（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+workPatterns:
+  get:
+    tags: [admin-settings]
+    operationId: listWorkPatterns
+    x-module: AdminSettings
+    summary: 勤務パターンの一覧を取得する
+    description: 勤務パターンを返す（UC-SE-08）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 勤務パターン。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkPatternList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createWorkPattern
+    x-module: AdminSettings
+    summary: 勤務パターンを登録する
+    description: 始業・終業・休憩・半休の定義を登録する（UC-SE-08）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/WorkPattern
+    responses:
+      "201":
+        description: 登録した勤務パターン。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkPattern
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+workPattern:
+  patch:
+    tags: [admin-settings]
+    operationId: updateWorkPattern
+    x-module: AdminSettings
+    summary: 勤務パターンを変更する
+    description: 変更は、その後に作る勤務予定から使われる（UC-SE-08）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: workPatternId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/WorkPattern
+    responses:
+      "200":
+        description: 変更後の勤務パターン。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/WorkPattern
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+calendars:
+  get:
+    tags: [admin-settings]
+    operationId: listCalendars
+    x-module: AdminSettings
+    summary: 会社カレンダーの一覧を取得する
+    description: カレンダーを返す（UC-SE-09）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: カレンダー。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/CalendarList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createCalendar
+    x-module: AdminSettings
+    summary: 会社カレンダーを登録する
+    description: カレンダーを登録する（UC-SE-09）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/Calendar
+    responses:
+      "201":
+        description: 登録したカレンダー。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/Calendar
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+calendarYear:
+  get:
+    tags: [admin-settings]
+    operationId: getCalendarYear
+    x-module: AdminSettings
+    summary: カレンダーの年を取得する
+    description: その年の例外の日（休日・出勤日）を返す（UC-SE-09）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: calendarId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: year
+        in: path
+        required: true
+        schema:
+          type: integer
+    responses:
+      "200":
+        description: 年の例外の日。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/CalendarYear
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+  put:
+    tags: [admin-settings]
+    operationId: putCalendarYear
+    x-module: AdminSettings
+    summary: カレンダーの年を保存する
+    description: 年の例外の日をすべて置き換える。変更した日以降の締めていない勤務日を再計算する（UC-SE-09）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: calendarId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: year
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: If-Match
+        in: header
+        description: 既存の年を上書きする場合は必須。
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/CalendarYear
+    responses:
+      "200":
+        description: 保存した年。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/CalendarYear
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締め済みの期間の日を変えようとした（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+calendarNationalHolidays:
+  post:
+    tags: [admin-settings]
+    operationId: applyNationalHolidays
+    x-module: AdminSettings
+    summary: 国民の祝日を一括で設定する
+    description: サービスが用意する国民の祝日の一覧を、その年に所定休日として加える（UC-SE-09）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: calendarId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: year
+        in: path
+        required: true
+        schema:
+          type: integer
+    responses:
+      "200":
+        description: 祝日を加えた年。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/CalendarYear
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        description: その年の祝日の一覧がまだない（NATIONAL_HOLIDAYS_NOT_AVAILABLE）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+leaveTypes:
+  get:
+    tags: [admin-settings]
+    operationId: listLeaveTypes
+    x-module: AdminSettings
+    summary: 休暇種別の一覧を取得する
+    description: 無効にした種別も含めて返す。従業員の申請の画面は、本人用の休暇の状況（getMyLeave）の `leaveTypes` を使う（UC-SE-10）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 休暇種別。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveTypeList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createLeaveType
+    x-module: AdminSettings
+    summary: 休暇種別を登録する
+    description: 休暇種別を登録する（UC-SE-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveType
+    responses:
+      "201":
+        description: 登録した休暇種別。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveType
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+leaveType:
+  patch:
+    tags: [admin-settings]
+    operationId: updateLeaveType
+    x-module: AdminSettings
+    summary: 休暇種別を変更する
+    description: 法定の種別（builtIn）も設定は変えられるが、区分は変えられない（UC-SE-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: leaveTypeId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveType
+    responses:
+      "200":
+        description: 変更後の休暇種別。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveType
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+leavePolicies:
+  get:
+    tags: [admin-settings]
+    operationId: listLeavePolicies
+    x-module: AdminSettings
+    summary: 有給の付与ルールの一覧を取得する
+    description: 付与ルールを返す（UC-SE-10）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 付与ルール。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeavePolicyList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createLeavePolicy
+    x-module: AdminSettings
+    summary: 有給の付与ルールを登録する
+    description: 有給の付与ルールを登録する（UC-SE-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeavePolicy
+    responses:
+      "201":
+        description: 登録した付与ルール。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeavePolicy
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+leavePolicy:
+  patch:
+    tags: [admin-settings]
+    operationId: updateLeavePolicy
+    x-module: AdminSettings
+    summary: 有給の付与ルールを変更する
+    description: 変更は、その後の付与予定から使われる（UC-SE-10）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: leavePolicyId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeavePolicy
+    responses:
+      "200":
+        description: 変更後の付与ルール。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeavePolicy
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+approvalRoutes:
+  get:
+    tags: [admin-settings]
+    operationId: listApprovalRoutes
+    x-module: AdminSettings
+    summary: 承認ルートの一覧を取得する
+    description: 承認ルートを返す（UC-SE-11）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 承認ルート。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/ApprovalRouteList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createApprovalRoute
+    x-module: AdminSettings
+    summary: 承認ルートを登録する
+    description: 申請の種類と対象（部署・雇用区分）ごとに、段（最大5段）と各段の承認者の決め方を登録する（UC-SE-11）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/ApprovalRoute
+    responses:
+      "201":
+        description: 登録した承認ルート。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/ApprovalRoute
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+approvalRoute:
+  patch:
+    tags: [admin-settings]
+    operationId: updateApprovalRoute
+    x-module: AdminSettings
+    summary: 承認ルートを変更する
+    description: 変更は、その後の申請から使われる（承認待ちの申請は変わらない。UC-SE-11）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: approvalRouteId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/ApprovalRoute
+    responses:
+      "200":
+        description: 変更後の承認ルート。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/ApprovalRoute
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+  delete:
+    tags: [admin-settings]
+    operationId: deleteApprovalRoute
+    x-module: AdminSettings
+    summary: 承認ルートを削除する
+    description: 既定のルートは削除できない（DEFAULT_ROUTE_REQUIRED。UC-SE-11）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: approvalRouteId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    responses:
+      "204":
+        description: 削除した。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+overtimeAgreements:
+  get:
+    tags: [admin-settings]
+    operationId: listOvertimeAgreements
+    x-module: AdminSettings
+    summary: 36協定の一覧を取得する
+    description: 36協定を返す（UC-SE-12）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 36協定。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/OvertimeAgreementList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createOvertimeAgreement
+    x-module: AdminSettings
+    summary: 36協定を登録する
+    description: 同じ部署か同じ雇用区分を同じ細かさで対象にした協定どうし（全社どうしも）は、有効期間が重なってはいけない（AGREEMENT_OVERLAP。UC-SE-12）。従業員には、当てはまる協定のうち対象の細かいものを1つ当てはめる。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/OvertimeAgreement
+    responses:
+      "201":
+        description: 登録した36協定。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/OvertimeAgreement
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+overtimeAgreement:
+  patch:
+    tags: [admin-settings]
+    operationId: updateOvertimeAgreement
+    x-module: AdminSettings
+    summary: 36協定を変更する
+    description: 協定を変更する。同じ部署か同じ雇用区分を同じ細かさで対象にした協定と有効期間が重なる変更はできない（AGREEMENT_OVERLAP。UC-SE-12）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: agreementId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/OvertimeAgreement
+    responses:
+      "200":
+        description: 変更後の36協定。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/OvertimeAgreement
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+devices:
+  get:
+    tags: [admin-settings]
+    operationId: listDevices
+    x-module: AdminSettings
+    summary: 共有端末の一覧を取得する
+    description: 共有端末と状態を返す（UC-SE-13）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: 共有端末。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/DeviceList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-settings]
+    operationId: createDevice
+    x-module: Auth
+    summary: 共有端末を登録し、登録コードを発行する
+    description: 登録コードは10分有効、1回限り（UC-KI-01、UC-SE-13）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/DeviceCreate
+    responses:
+      "201":
+        description: 端末と登録コード。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/DeviceRegistrationCode
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+deviceRegistrationCode:
+  post:
+    tags: [admin-settings]
+    operationId: reissueDeviceRegistrationCode
+    x-module: Auth
+    summary: 登録コードを発行し直す
+    description: 登録コード（10分有効、1回限り）を発行し直す。前のコードは無効になる（UC-SE-13）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+    responses:
+      "200":
+        description: 新しい登録コード。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/DeviceRegistrationCode
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 失効した端末（DEVICE_REVOKED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+deviceRevoke:
+  post:
+    tags: [admin-settings]
+    operationId: revokeDevice
+    x-module: Auth
+    summary: 共有端末を失効させる
+    description: 端末の資格情報を失効させる。その端末からの打刻はできなくなる（UC-SE-13）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+    responses:
+      "200":
+        description: 失効させた端末。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/Device
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+tenantSettings:
+  get:
+    tags: [admin-settings]
+    operationId: getTenantSettings
+    x-module: AdminSettings
+    summary: テナントの設定を取得する
+    description: テナントの設定を返す（UC-SE-14）。
+    security:
+      - bearerAuth: [admin]
+    responses:
+      "200":
+        description: テナントの設定。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/TenantSettings
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  patch:
+    tags: [admin-settings]
+    operationId: updateTenantSettings
+    x-module: AdminSettings
+    summary: テナントの設定を変更する
+    description: |
+      テナントの設定を変更する（UC-SE-14）。給与の締め日は、最初の締めの前だけ変えられる（PAYROLL_CLOSING_DAY_LOCKED）。変えたら
+      締めていない期間を集計し直す。日替わり時刻の変更は、その後の打刻から効く（記録済みの打刻の勤務日は変えない）。
+    x-required-roles: [tenantAdmin]
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/rules.yaml#/TenantSettings
+    responses:
+      "200":
+        description: 変更後の設定。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/rules.yaml#/TenantSettings
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締めた期間があるため、給与の締め日を変えられない（PAYROLL_CLOSING_DAY_LOCKED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed

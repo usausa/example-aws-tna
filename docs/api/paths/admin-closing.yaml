@@ -1,0 +1,103 @@
+# 管理: 月次の締め（/api/v1/admin/period-closes）。bearerAuth の admin スコープ。
+periodClose:
+  get:
+    tags: [admin-closing]
+    operationId: getPeriodClose
+    x-module: AdminOps
+    summary: 締めの状況と締める前のチェックを取得する
+    description: 期間と範囲を指定して、締めの状態と、締めを止めるエラー・申請、警告を返す（UC-AD-07）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/Period
+      - name: scope
+        in: query
+        description: "`all` または部署の ID。"
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: 締めの状況。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/PeriodCloseStatus
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+periodCloseClose:
+  post:
+    tags: [admin-closing]
+    operationId: closePeriod
+    x-module: AdminOps
+    summary: 締める
+    description: |
+      締める前のチェックでエラーと申請が0件なら、範囲の勤怠をロックし、期間の集計を確定する。
+      フレックスの過不足と1か月単位の変形の時間外もここで確定する。処理は非同期のジョブで行う（UC-AD-07）。
+      締められるのは、期間の末日の打刻の受付期限を過ぎてから。範囲の従業員は、期間の中に在籍した人で、
+      部署は期間の末日（それより前に退職した人は退職日）の所属で決める。全社の締めは、まだ締めていない人だけを締める。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/Period
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/PeriodCloseRequest
+    responses:
+      "202":
+        description: 受け付けた。
+        headers:
+          Location:
+            $ref: ../components/headers.yaml#/Location
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Job
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締めを止めるエラーや申請が残っている（CLOSE_PRECHECK_FAILED）、締め済み（PERIOD_ALREADY_CLOSED）、受付期限の前（CLOSE_TOO_EARLY）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+periodCloseReopen:
+  post:
+    tags: [admin-closing]
+    operationId: reopenPeriod
+    x-module: AdminOps
+    summary: 再オープンする
+    description: 締め済みの範囲を、理由を記録して開け直す（UC-AD-07）。全社で締めた期間も、部署の範囲で開け直せる。処理は非同期のジョブで行う。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/Period
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/PeriodReopenRequest
+    responses:
+      "202":
+        description: 受け付けた。
+        headers:
+          Location:
+            $ref: ../components/headers.yaml#/Location
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Job
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締めていない（PERIOD_NOT_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem

@@ -1,0 +1,241 @@
+# 共通の型
+Ulid:
+  type: string
+  description: ULID（26文字）。
+  pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+  examples:
+    - 01J9ZK3M8Q6W2E4R5T7Y9V1H0P
+NullableUlid:
+  type:
+    - string
+    - "null"
+  description: ULID（26文字）。値がなければ null。
+  pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+PeriodId:
+  type: string
+  description: 給与の締め期間の ID。期間の末日が属する年月（`YYYY-MM`）。
+  pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+  examples:
+    - 2026-10
+Minutes:
+  type: integer
+  minimum: 0
+  description: 時間の量（分）。
+SignedMinutes:
+  type: integer
+  description: 正負のある時間の量（分）。
+MinuteOfDay:
+  type: integer
+  minimum: 0
+  maximum: 2879
+  description: 勤務日の 0:00 からの経過分。翌日にかかる時刻は 1440 以上（例 翌2:00 は 1560）。
+NullableMinuteOfDay:
+  type:
+    - integer
+    - "null"
+  minimum: 0
+  maximum: 2879
+  description: MinuteOfDay と同じ。値がなければ null。
+Weekday:
+  type: string
+  enum: [sunday, monday, tuesday, wednesday, thursday, friday, saturday]
+DayType:
+  type: string
+  description: 日の種類。
+  enum: [workday, nonStatutoryHoliday, statutoryHoliday]
+Period:
+  type: object
+  required: [id, start, end]
+  properties:
+    id:
+      $ref: "#/PeriodId"
+    start:
+      type: string
+      format: date
+    end:
+      type: string
+      format: date
+LeaveAmount:
+  type: object
+  description: 休暇の量。日数（0.5日単位）と時間（分）の組。
+  required: [days, minutes]
+  properties:
+    days:
+      type: number
+      minimum: 0
+      multipleOf: 0.5
+    minutes:
+      type: integer
+      minimum: 0
+SignedLeaveAmount:
+  type: object
+  description: 正負のある休暇の量（調整に使う）。
+  required: [days, minutes]
+  properties:
+    days:
+      type: number
+      multipleOf: 0.5
+    minutes:
+      type: integer
+EmployeeRef:
+  type: object
+  required: [employeeId, employeeCode, name]
+  properties:
+    employeeId:
+      $ref: "#/Ulid"
+    employeeCode:
+      type: string
+    name:
+      type: string
+      description: 表示用の氏名。
+Problem:
+  type: object
+  description: エラー（RFC 9457 Problem Details にアプリのコードを加えたもの）。
+  required: [type, title, status, instance, code]
+  properties:
+    type:
+      type: string
+      format: uri-reference
+      description: エラーの種類を表す URI。`/problems/` に、コードを小文字のハイフン区切りにしたものを付ける（例 `/problems/period-closed`）。
+    title:
+      type: string
+      description: 利用者向けの短い文言（日本語）。
+    status:
+      type: integer
+    detail:
+      type:
+        - string
+        - "null"
+      description: 補足の説明。なければ null。
+    instance:
+      type: string
+      description: 調査用の要求の ID（API Gateway の要求の ID）。
+    code:
+      type: string
+      description: アプリのエラーコード（API の README のコード一覧を参照）。
+      examples:
+        - PUNCH_SEQUENCE_INVALID
+    errors:
+      type:
+        - array
+        - "null"
+      description: 個々の誤り（入力の誤り、シフト表の検証のエラーなど）。なければ null。
+      items:
+        $ref: "#/ValidationIssue"
+ValidationIssue:
+  type: object
+  description: 検証の結果（エラーまたは警告）。入力の誤りでは `field` に項目の位置を入れる。
+  required: [severity, code, message]
+  properties:
+    severity:
+      type: string
+      enum: [error, warning]
+    code:
+      type: string
+    message:
+      type: string
+    employeeId:
+      $ref: "#/NullableUlid"
+    workDate:
+      type:
+        - string
+        - "null"
+      format: date
+      description: 対象の勤務日。なければ null。
+    field:
+      type:
+        - string
+        - "null"
+      description: 項目の位置（本文は JSON Pointer。例 `/leave/from`。ヘッダーとクエリは名前。例 `Idempotency-Key`、`nextToken`）。なければ null。
+Job:
+  type: object
+  description: 非同期のジョブ。
+  required: [jobId, type, status, createdAt]
+  properties:
+    jobId:
+      $ref: "#/Ulid"
+    type:
+      $ref: "#/JobType"
+    status:
+      $ref: "#/JobStatus"
+    progress:
+      type: object
+      properties:
+        processed:
+          type: integer
+        total:
+          type: integer
+    result:
+      type: object
+      properties:
+        downloadUrl:
+          type: string
+          format: uri
+          description: 出力ファイルの署名付き URL（10分で失効）。
+        expiresAt:
+          type: string
+          format: date-time
+        summary:
+          type: object
+          additionalProperties: true
+    error:
+      $ref: "#/Problem"
+    createdAt:
+      type: string
+      format: date-time
+    finishedAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+PageToken:
+  type:
+    - string
+    - "null"
+  description: 続きがあれば、次の要求の `nextToken` に指定する値（中身を解釈しない文字列。有効期限は1時間）。続きがなければ null。
+CsvImportEncoding:
+  type: string
+  description: 取り込む CSV の文字コード。`utf8` は BOM の有無を問わない。
+  enum: [utf8, shiftJis]
+CsvExportEncoding:
+  type: string
+  description: 出力する CSV の文字コード。
+  enum: [utf8Bom, shiftJis]
+CsvTimeFormat:
+  type: string
+  description: CSV の時間の表し方（`hmm` は「8:30」、`minutes` は分の整数、`decimalHours` は十進法の時間「8.50」）。
+  enum: [hmm, minutes, decimalHours]
+CsvFormat:
+  type: object
+  description: CSV の形式。
+  required: [encoding, timeFormat]
+  properties:
+    encoding:
+      $ref: "#/CsvExportEncoding"
+    timeFormat:
+      $ref: "#/CsvTimeFormat"
+ETagValue:
+  type: string
+  readOnly: true
+  description: リソースの版。単一の取得の ETag ヘッダーと同じ値で、一覧の要素から更新するときは、この値を If-Match に送る。
+  examples:
+    - '"7"'
+JobType:
+  type: string
+  description: ジョブの種類（出力、従業員の取込、締め、再オープン、再計算）。
+  enum: [export, employeeImport, periodClose, periodReopen, recalculation]
+JobStatus:
+  type: string
+  description: ジョブの状態（待ち、実行中、成功、失敗）。
+  enum: [queued, running, succeeded, failed]
+JobList:
+  type: object
+  description: ジョブの一覧（新しい順）。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Job"
+    nextToken:
+      $ref: "#/PageToken"

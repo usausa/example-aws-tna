@@ -1,0 +1,458 @@
+# 認証（/auth/v1）。`security: []` の操作は JWT オーソライザーの対象外にする。ログイン、パスワードの再設定、共有端末の登録とトークンには、CloudFront と WAF で IP ごとのレート制限をかける。
+login:
+  post:
+    tags: [auth]
+    operationId: login
+    x-module: Auth
+    summary: ログインする
+    description: |
+      企業コード・ログインID・パスワードで認証する（UC-AU-02）。TOTP を登録していれば `mfaRequired` を返す。
+      管理者が発行した初期パスワードか、TOTP がなく15文字に満たないパスワード（管理者が TOTP を解除した後）なら
+      `passwordChangeRequired` を返す。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/LoginRequest
+    responses:
+      "200":
+        description: ログインの結果。`authenticated` の場合はリフレッシュトークンの Cookie を設定する。
+        headers:
+          Set-Cookie:
+            $ref: ../components/headers.yaml#/SetCookieRefresh
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/LoginResponse
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        description: 認証できない（INVALID_CREDENTIALS。アカウントの有無を区別しない）。ロック中も同じ。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+loginMfa:
+  post:
+    tags: [auth]
+    operationId: verifyMfa
+    x-module: Auth
+    summary: 二要素認証のコードを確認する
+    description: ログインの途中で TOTP のコードを確認する（UC-AU-02）。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/MfaVerifyRequest
+    responses:
+      "200":
+        description: 認証が完了した。
+        headers:
+          Set-Cookie:
+            $ref: ../components/headers.yaml#/SetCookieRefresh
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/AuthenticatedResult
+      "401":
+        description: コードの誤り、または途中の状態の期限切れ（MFA_INVALID、MFA_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+token:
+  post:
+    tags: [auth]
+    operationId: refreshToken
+    x-module: Auth
+    summary: アクセストークンを更新する
+    description: |
+      Cookie のリフレッシュトークンで新しいアクセストークンを発行し、リフレッシュトークンを新しいものに替える（UC-AU-09）。
+      古いリフレッシュトークンが再び使われたら、その系列をすべて失効させる。管理機能の再認証が有効な間は `admin` スコープを含める。
+    security:
+      - refreshCookie: []
+    parameters:
+      - $ref: ../components/parameters.yaml#/CsrfHeader
+    responses:
+      "200":
+        description: 新しいアクセストークン。
+        headers:
+          Set-Cookie:
+            $ref: ../components/headers.yaml#/SetCookieRefresh
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/TokenResponse
+      "401":
+        description: リフレッシュトークンが無効・期限切れ・再利用（SESSION_EXPIRED）。ログイン画面に戻す。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "403":
+        description: "`X-TNA-Request` ヘッダーがない（CSRF_HEADER_MISSING）。"
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+logout:
+  post:
+    tags: [auth]
+    operationId: logout
+    x-module: Auth
+    summary: ログアウトする
+    description: その端末のセッション（`allDevices` なら本人のすべてのセッション）を失効させ、Cookie を消す（UC-AU-03）。
+    security:
+      - refreshCookie: []
+    parameters:
+      - $ref: ../components/parameters.yaml#/CsrfHeader
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/LogoutRequest
+    responses:
+      "204":
+        description: ログアウトした。
+        headers:
+          Set-Cookie:
+            $ref: ../components/headers.yaml#/SetCookieRefresh
+      "403":
+        description: "`X-TNA-Request` ヘッダーがない（CSRF_HEADER_MISSING）。"
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+passwordChange:
+  post:
+    tags: [auth]
+    operationId: changePassword
+    x-module: Auth
+    summary: パスワードを変更する
+    description: 現在のパスワードを確認して変更し、いまの端末以外のセッションを失効させ、本人にメールで知らせる（UC-AU-04）。
+    security:
+      - bearerAuth: [employee]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/PasswordChangeRequest
+    responses:
+      "204":
+        description: 変更した。
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        description: 現在のパスワードの誤り（INVALID_CREDENTIALS）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        description: パスワードの条件を満たさない（PASSWORD_POLICY_VIOLATION）。`errors` に理由（短すぎる、漏えい・頻出のパスワード、ログインID と同じ）を入れる。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+passwordInitial:
+  post:
+    tags: [auth]
+    operationId: changeInitialPassword
+    x-module: Auth
+    summary: 初期パスワードを変更する
+    description: |
+      管理者が発行した初期パスワードか、TOTP がなく15文字に満たないパスワードでログインした後に、新しいパスワードを設定する
+      （UC-AU-02）。完了後はログインし直す。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/InitialPasswordChangeRequest
+    responses:
+      "204":
+        description: 設定した。
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        description: 変更のための値が無効・期限切れ。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        description: パスワードの条件を満たさない（PASSWORD_POLICY_VIOLATION）。`errors` に理由（短すぎる、漏えい・頻出のパスワード、ログインID と同じ）を入れる。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+passwordForgot:
+  post:
+    tags: [auth]
+    operationId: forgotPassword
+    x-module: Auth
+    summary: パスワードの再設定を依頼する
+    description: アカウントの有無にかかわらず 202 を返す。メールアドレスが登録されていれば再設定のリンク（30分有効）を送る（UC-AU-05）。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/PasswordForgotRequest
+    responses:
+      "202":
+        description: 受け付けた。
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+passwordReset:
+  post:
+    tags: [auth]
+    operationId: resetPassword
+    x-module: Auth
+    summary: パスワードを再設定する
+    description: 再設定のリンクの値で新しいパスワードを設定し、すべてのセッションを失効させる（UC-AU-05）。自動ではログインさせない。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/PasswordResetRequest
+    responses:
+      "204":
+        description: 再設定した。
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "410":
+        description: リンクの期限切れ・使用済み（TOKEN_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        description: パスワードの条件を満たさない（PASSWORD_POLICY_VIOLATION）。`errors` に理由（短すぎる、漏えい・頻出のパスワード、ログインID と同じ）を入れる。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+invitationInspect:
+  post:
+    tags: [auth]
+    operationId: inspectInvitation
+    x-module: Auth
+    summary: 招待の内容を確認する
+    description: 招待のリンクの値から、パスワード設定の画面に出すログインIDなどを返す（UC-AU-01）。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/InvitationInspectRequest
+    responses:
+      "200":
+        description: 招待の内容。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/InvitationInfo
+      "410":
+        description: 期限切れ・使用済み（TOKEN_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+invitationAccept:
+  post:
+    tags: [auth]
+    operationId: acceptInvitation
+    x-module: Auth
+    summary: 招待を受けてパスワードを設定する
+    description: パスワードを設定してアカウントを有効にする（UC-AU-01）。完了後はログイン画面に移る。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/InvitationAcceptRequest
+    responses:
+      "204":
+        description: 設定した。
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "410":
+        description: 期限切れ・使用済み（TOKEN_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        description: パスワードの条件を満たさない（PASSWORD_POLICY_VIOLATION）。`errors` に理由（短すぎる、漏えい・頻出のパスワード、ログインID と同じ）を入れる。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+stepUp:
+  post:
+    tags: [auth]
+    operationId: stepUp
+    x-module: Auth
+    summary: 管理機能のために再認証する
+    description: パスワードと TOTP を確認し、`admin` スコープを含むアクセストークンを返す（UC-AU-07）。有効なのは12時間、または最後の管理操作から1時間。
+    security:
+      - bearerAuth: [employee]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/StepUpRequest
+    responses:
+      "200":
+        description: 管理機能を使えるアクセストークン。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/TokenResponse
+      "401":
+        description: パスワードまたはコードの誤り。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "403":
+        description: 管理者ロールがない、または TOTP が未登録（MFA_ENROLLMENT_REQUIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+totpSetup:
+  post:
+    tags: [auth]
+    operationId: setupTotp
+    x-module: Auth
+    summary: TOTP の登録を始める
+    description: 現在のパスワードを確かめて、秘密鍵と QR コード用の URI を返す（UC-AU-06）。10分以内に確認のコードを送る。パスワードの誤りはログインの失敗と合わせて数える。
+    security:
+      - bearerAuth: [employee]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/TotpSetupRequest
+    responses:
+      "200":
+        description: 登録の情報。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/TotpSetupResponse
+      "401":
+        description: パスワードの誤り、またはロック中（INVALID_CREDENTIALS）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+totpConfirm:
+  post:
+    tags: [auth]
+    operationId: confirmTotp
+    x-module: Auth
+    summary: TOTP の登録を完了する
+    description: 認証アプリのコードを確認して登録を完了し、本人にメールで知らせる（UC-AU-06）。
+    security:
+      - bearerAuth: [employee]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/TotpConfirmRequest
+    responses:
+      "204":
+        description: 登録した。
+      "401":
+        description: コードの誤り（MFA_INVALID）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+kioskRegister:
+  post:
+    tags: [auth]
+    operationId: registerKiosk
+    x-module: Auth
+    summary: 共有端末を登録する
+    description: 管理者が発行した登録コードで端末を登録し、端末の資格情報を Cookie に設定する（UC-KI-01）。
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/auth.yaml#/KioskRegisterRequest
+    responses:
+      "200":
+        description: 登録した。
+        headers:
+          Set-Cookie:
+            $ref: ../components/headers.yaml#/SetCookieDevice
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/KioskRegistration
+      "410":
+        description: 登録コードの期限切れ・使用済み（TOKEN_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+kioskToken:
+  post:
+    tags: [auth]
+    operationId: issueKioskToken
+    x-module: Auth
+    summary: 共有端末のアクセストークンを発行する
+    description: 端末の資格情報（Cookie）で、`kiosk` スコープのアクセストークン（15分）を発行する（UC-KI-02）。
+    security:
+      - deviceCookie: []
+    parameters:
+      - $ref: ../components/parameters.yaml#/CsrfHeader
+    responses:
+      "200":
+        description: 端末用のアクセストークン。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/auth.yaml#/TokenResponse
+      "401":
+        description: 端末の資格情報が無効（DEVICE_REVOKED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "403":
+        description: "`X-TNA-Request` ヘッダーがない（CSRF_HEADER_MISSING）。"
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem

@@ -23,7 +23,7 @@ AWS のサーバーレス構成と .NET で作る勤怠管理（Time & Attendanc
 
 | フォルダ | 中身 |
 | --- | --- |
-| `docs/` | 仕様と設計、いまの方針（`docs/decisions.md`）、計画と進捗（`docs/plan.md`） |
+| `docs/` | API の仕様（`docs/api`）、全体構成とデータ設計（`docs/design`）、いまの方針（`docs/decisions.md`）、計画と進捗（`docs/plan.md`） |
 | `src/` | アプリケーション |
 | `tests/` | テスト |
 

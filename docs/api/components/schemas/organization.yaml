@@ -1,0 +1,431 @@
+# 組織・従業員・本人の情報の型
+EmployeeStatus:
+  type: string
+  enum: [active, onLeaveOfAbsence, terminated]
+AccountStatus:
+  type: string
+  description: "`none` はアカウントがない（共有端末での打刻だけの従業員）。"
+  enum: [none, invited, active, locked, disabled]
+AdminScope:
+  type: object
+  description: 勤怠管理者の管理範囲。
+  required: [departmentId, includeDescendants]
+  properties:
+    departmentId:
+      $ref: common.yaml#/Ulid
+    includeDescendants:
+      type: boolean
+Roles:
+  type: object
+  required: [tenantAdmin, attendanceAdmin]
+  properties:
+    tenantAdmin:
+      type: boolean
+    attendanceAdmin:
+      type:
+        - object
+        - "null"
+      description: 勤怠管理者でなければ null。
+      required: [scopes]
+      properties:
+        scopes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/AdminScope"
+AccountSummary:
+  type: object
+  required: [status, mfaEnabled, pinSet]
+  properties:
+    status:
+      $ref: "#/AccountStatus"
+    loginId:
+      type:
+        - string
+        - "null"
+    mfaEnabled:
+      type: boolean
+    pinSet:
+      type: boolean
+    pinInitial:
+      type: boolean
+      description: 管理者が発行した初期 PIN のまま。
+    lastLoginAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+EmployeeAssignment:
+  type: object
+  description: 従業員の条件（有効期間付き）。
+  required: [validFrom, departmentId, employmentTypeId, workRuleId, leavePolicyId]
+  properties:
+    validFrom:
+      type: string
+      format: date
+    validTo:
+      type:
+        - string
+        - "null"
+      format: date
+      readOnly: true
+    departmentId:
+      $ref: common.yaml#/Ulid
+    employmentTypeId:
+      $ref: common.yaml#/Ulid
+    workRuleId:
+      $ref: common.yaml#/Ulid
+    leavePolicyId:
+      $ref: common.yaml#/Ulid
+    weeklyScheduledDays:
+      type:
+        - number
+        - "null"
+      minimum: 0
+      maximum: 7
+    annualScheduledDays:
+      type:
+        - integer
+        - "null"
+    weeklyScheduledMinutes:
+      type:
+        - integer
+        - "null"
+      minimum: 0
+Employee:
+  type: object
+  required: [employeeId, employeeCode, familyName, givenName, hireDate, status, current, account, roles]
+  properties:
+    employeeId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    employeeCode:
+      type: string
+      maxLength: 20
+    familyName:
+      type: string
+      maxLength: 50
+    givenName:
+      type: string
+      maxLength: 50
+    familyNameKana:
+      type:
+        - string
+        - "null"
+      maxLength: 50
+      description: 姓のかな（任意）。全角カタカナで持ち、ひらがなと半角のカナは全角カタカナにそろえて保存する。
+    givenNameKana:
+      type:
+        - string
+        - "null"
+      maxLength: 50
+      description: 名のかな（任意）。姓のかなと同じ。
+    email:
+      type:
+        - string
+        - "null"
+      format: email
+    hireDate:
+      type: string
+      format: date
+    terminationDate:
+      type:
+        - string
+        - "null"
+      format: date
+    status:
+      $ref: "#/EmployeeStatus"
+    current:
+      $ref: "#/EmployeeAssignment"
+    account:
+      $ref: "#/AccountSummary"
+    roles:
+      $ref: "#/Roles"
+    etag:
+      $ref: common.yaml#/ETagValue
+EmployeeListItem:
+  type: object
+  required: [employeeId, employeeCode, name, departmentId, status, accountStatus]
+  properties:
+    employeeId:
+      $ref: common.yaml#/Ulid
+    employeeCode:
+      type: string
+    name:
+      type: string
+    departmentId:
+      $ref: common.yaml#/Ulid
+    employmentTypeId:
+      $ref: common.yaml#/Ulid
+    status:
+      $ref: "#/EmployeeStatus"
+    accountStatus:
+      $ref: "#/AccountStatus"
+EmployeeCreate:
+  type: object
+  required: [employeeCode, familyName, givenName, hireDate, assignment]
+  properties:
+    employeeCode:
+      type: string
+      maxLength: 20
+    familyName:
+      type: string
+    givenName:
+      type: string
+    familyNameKana:
+      type: string
+      maxLength: 50
+      description: 姓のかな（任意）。
+    givenNameKana:
+      type: string
+      maxLength: 50
+      description: 名のかな（任意）。
+    email:
+      type: string
+      format: email
+    hireDate:
+      type: string
+      format: date
+    assignment:
+      description: 入社日から有効な条件（validFrom は入社日になる）。
+      type: object
+      required: [departmentId, employmentTypeId]
+      properties:
+        departmentId:
+          $ref: common.yaml#/Ulid
+        employmentTypeId:
+          $ref: common.yaml#/Ulid
+        workRuleId:
+          $ref: common.yaml#/Ulid
+          description: 省略すると雇用区分の既定。
+        leavePolicyId:
+          $ref: common.yaml#/Ulid
+          description: 省略すると雇用区分の既定。
+        weeklyScheduledDays:
+          type: number
+        annualScheduledDays:
+          type: integer
+          description: 年間の所定労働日数（週で決められない場合。比例付与の判定に使う）。
+        weeklyScheduledMinutes:
+          type: integer
+    sendInvitation:
+      type: boolean
+      default: true
+      description: メールアドレスがあれば招待メールを送る。
+    issueInitialPin:
+      type: boolean
+      default: false
+      description: 共有端末用の初期 PIN を発行する（応答で一度だけ返す）。
+EmployeeCreated:
+  type: object
+  required: [employee]
+  properties:
+    employee:
+      $ref: "#/Employee"
+    initialPin:
+      type:
+        - string
+        - "null"
+      description: 発行した初期 PIN（この応答でだけ返す）。同じ冪等キーの再送では null になるため、PIN のリセット（resetPin）で発行し直す。
+EmployeePatch:
+  type: object
+  description: 基本情報の部分更新（JSON Merge Patch）。条件の変更は assignments で行う。
+  properties:
+    employeeCode:
+      type: string
+    familyName:
+      type: string
+    givenName:
+      type: string
+    familyNameKana:
+      type:
+        - string
+        - "null"
+      maxLength: 50
+      description: 姓のかな（任意）。全角カタカナで持ち、ひらがなと半角のカナは全角カタカナにそろえて保存する。
+    givenNameKana:
+      type:
+        - string
+        - "null"
+      maxLength: 50
+      description: 名のかな（任意）。姓のかなと同じ。
+    email:
+      type:
+        - string
+        - "null"
+      format: email
+    hireDate:
+      type: string
+      format: date
+      description: |
+        入社日の訂正（UC-SE-16）。旧い入社日と新しい入社日の間に勤怠・休暇・申請の記録がなく、その間が締め済みの期間に
+        かからず、有給をまだ付与していない場合だけ変えられる（HIRE_DATE_LOCKED）。最初の条件の適用日も動かす。
+TerminateRequest:
+  type: object
+  required: [terminationDate]
+  properties:
+    terminationDate:
+      type: string
+      format: date
+RolesUpdate:
+  $ref: "#/Roles"
+OneTimeSecret:
+  type: object
+  description: 一度だけ返す秘密の値（初期パスワード、初期 PIN）。
+  required: [value, expiresAt]
+  properties:
+    value:
+      type: string
+    expiresAt:
+      type: string
+      format: date-time
+Department:
+  type: object
+  required: [departmentId, code, name, status]
+  properties:
+    departmentId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    code:
+      type: string
+      maxLength: 20
+    name:
+      type: string
+      maxLength: 100
+    parentId:
+      $ref: common.yaml#/NullableUlid
+    managerEmployeeId:
+      $ref: common.yaml#/NullableUlid
+    status:
+      type: string
+      enum: [active, inactive]
+    etag:
+      $ref: common.yaml#/ETagValue
+EmploymentType:
+  type: object
+  required: [employmentTypeId, code, name, defaultWorkRuleId, defaultLeavePolicyId, status]
+  properties:
+    employmentTypeId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    code:
+      type: string
+    name:
+      type: string
+    defaultWorkRuleId:
+      $ref: common.yaml#/Ulid
+    defaultLeavePolicyId:
+      $ref: common.yaml#/Ulid
+    status:
+      type: string
+      enum: [active, inactive]
+      description: 無効にした雇用区分は、新しい条件で選べない。いまの条件で使っている従業員がいれば無効にできない。
+    etag:
+      $ref: common.yaml#/ETagValue
+Me:
+  type: object
+  description: ログインしている本人の情報（GET /api/v1/me）。
+  required: [tenant, employee, roles, account, features]
+  properties:
+    tenant:
+      $ref: "#/MeTenant"
+    employee:
+      $ref: "#/MeEmployee"
+    roles:
+      $ref: "#/Roles"
+    isApprover:
+      type: boolean
+      description: 承認待ちの申請を持つことがある（所属長、承認ルートの指定など）。
+    account:
+      $ref: "#/AccountSummary"
+    features:
+      $ref: "#/MeFeatures"
+KioskPinSet:
+  type: object
+  required: [pin]
+  properties:
+    pin:
+      type: string
+      pattern: "^[0-9]{4,6}$"
+      writeOnly: true
+MeTenant:
+  type: object
+  description: 本人のテナント。
+  required: [tenantCode, name, timeZone]
+  properties:
+    tenantCode:
+      type: string
+    name:
+      type: string
+    timeZone:
+      type: string
+      examples:
+        - Asia/Tokyo
+MeEmployee:
+  type: object
+  description: 本人の従業員の情報。
+  required: [employeeId, employeeCode, name, departmentName, workSystem]
+  properties:
+    employeeId:
+      $ref: common.yaml#/Ulid
+    employeeCode:
+      type: string
+    name:
+      type: string
+    departmentName:
+      type: string
+    workSystem:
+      $ref: rules.yaml#/WorkSystem
+MeFeatures:
+  type: object
+  description: 画面の表示を変えるテナントの設定。
+  required: [locationTracking]
+  properties:
+    locationTracking:
+      $ref: rules.yaml#/LocationTrackingSetting
+EmployeeImportApplyRequest:
+  type: object
+  description: 検証済みの従業員の取込の反映。
+  required: [sendInvitations]
+  properties:
+    sendInvitations:
+      type: boolean
+      description: 新規の従業員に招待メールを送るか。
+EmployeeList:
+  type: object
+  description: 従業員の一覧（社員番号の順）。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/EmployeeListItem"
+    nextToken:
+      $ref: common.yaml#/PageToken
+EmployeeAssignmentList:
+  type: object
+  description: 従業員の条件の履歴（古い順）。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/EmployeeAssignment"
+DepartmentList:
+  type: object
+  description: 部署の一覧（ツリーは parentId で組み立てる）。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Department"
+EmploymentTypeList:
+  type: object
+  description: 雇用区分の一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/EmploymentType"

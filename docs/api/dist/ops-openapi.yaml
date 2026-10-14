@@ -1,0 +1,852 @@
+openapi: 3.1.0
+info:
+  title: 勤怠管理 運営者 API
+  version: 0.1.0
+  summary: サービスの運営者がテナントとサービス全体の設定を扱う API。
+  description: |
+    テナント向けの API とは別の HTTP API にし、AWS IAM の署名（SigV4）で認証する。CloudFront からは公開しない。
+    MVP では画面を作らず、この API とコマンドラインツールで運用する。
+
+    - 呼び出せるのは運営者の IAM ロールだけ。操作はすべて運営の監査ログに残す（呼び出した IAM の主体を記録する）。
+    - 規約（エラー、冪等キー、日時・時間の表し方）はテナント向けの API と同じ（`../README.md`）。
+servers:
+  - url: https://{apiId}.execute-api.ap-northeast-1.amazonaws.com
+    description: 運営者用の HTTP API（東京リージョン）。
+    variables:
+      apiId:
+        default: ops-api-id
+        description: デプロイで決まる API の ID。
+security:
+  - sigv4: []
+tags:
+  - name: tenants
+    description: テナントの開設・停止・再開、テナント管理者の TOTP の解除。
+  - name: service-settings
+    description: 法定値の版と国民の祝日（全テナントで共通）。
+paths:
+  /ops/v1/tenants:
+    get:
+      tags:
+        - tenants
+      operationId: listTenants
+      x-module: Ops
+      summary: テナントの一覧を取得する
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TenantStatus'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/NextToken'
+      responses:
+        '200':
+          description: テナントの一覧。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - tenants
+      operationId: createTenant
+      x-module: Ops
+      summary: テナントを開設する
+      description: |
+        テナントを作り、既定のデータを用意し、最初のテナント管理者に招待メールを送る（UC-OP-01）。既定のデータは、部署（企業名）、
+        雇用区分（正社員）、勤務パターン（日勤 9:00〜18:00）、就業ルールの見本（固定時間制）、国民の祝日を入れたカレンダー、既定の
+        付与ルール（法定どおり・入社日基準）、法定の休暇種別、既定の承認ルート（所属長1段）。それぞれを作る機能の作業で開設に足す。
+        最初のテナント管理者には、これらの条件を付けて名簿に載せる。
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+      responses:
+        '201':
+          description: 開設した。
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: 企業コードの重複（TENANT_CODE_DUPLICATED）。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /ops/v1/tenants/{tenantId}:
+    get:
+      tags:
+        - tenants
+      operationId: getTenant
+      x-module: Ops
+      summary: テナントを取得する
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: テナント。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /ops/v1/tenants/{tenantId}/suspend:
+    post:
+      tags:
+        - tenants
+      operationId: suspendTenant
+      x-module: Ops
+      summary: テナントを停止する
+      description: |
+        ログイン・打刻・API の呼び出しを受け付けなくする（TENANT_SUSPENDED）。発行済みのセッションも失効させる。
+        データは保持し、定時処理（付与・通知など）も止める（UC-OP-02）。
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorReason'
+      responses:
+        '200':
+          description: 停止したテナント。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: すでに停止している（TENANT_STATE_INVALID）。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /ops/v1/tenants/{tenantId}/resume:
+    post:
+      tags:
+        - tenants
+      operationId: resumeTenant
+      x-module: Ops
+      summary: テナントを再開する
+      description: 停止を解く。止めていた間の定時処理（有給の付与など）は、再開の後に順に行う（UC-OP-02）。
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorReason'
+      responses:
+        '200':
+          description: 再開したテナント。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 停止していない（TENANT_STATE_INVALID）。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /ops/v1/tenants/{tenantId}/employees/{employeeId}/mfa-reset:
+    post:
+      tags:
+        - tenants
+      operationId: resetTenantAdminMfa
+      x-module: Ops
+      summary: テナント管理者の TOTP を解除する
+      description: |
+        テナント管理者が1人だけで TOTP を紛失した場合に、本人確認をしたうえで解除する（UC-OP-03）。
+        本人確認の方法と記録を必須にし、テナントの監査ログにも残す。本人とテナントの連絡先にメールで知らせる。
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/EmployeeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaResetRequest'
+      responses:
+        '204':
+          description: 解除した。
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: テナント管理者ではない、または TOTP が未登録（ACCOUNT_STATE_INVALID）。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /ops/v1/statutory-parameters:
+    get:
+      tags:
+        - service-settings
+      operationId: listStatutoryParameterVersions
+      x-module: Ops
+      summary: 法定値の版の一覧を取得する
+      description: 施行日の古い順に返す（L-02）。
+      responses:
+        '200':
+          description: 法定値の版。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatutoryParametersVersionList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - service-settings
+      operationId: createStatutoryParameterVersion
+      x-module: Ops
+      summary: 法定値の新しい版を作る
+      description: |
+        法改正に合わせて、施行日付きの新しい版を作る（L-02）。施行日は翌日以降に限る（過去の勤怠の計算は変えない）。
+        施行日より前なら、同じ施行日の版を作り直せる（前の版は取り消しとして残す）。
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatutoryParametersVersionCreate'
+      responses:
+        '201':
+          description: 作った版。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatutoryParametersVersion'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: 施行日が今日以前（EFFECTIVE_DATE_INVALID）。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /ops/v1/national-holidays/{year}:
+    get:
+      tags:
+        - service-settings
+      operationId: getNationalHolidays
+      x-module: Ops
+      summary: 国民の祝日の一覧を取得する
+      parameters:
+        - $ref: '#/components/parameters/Year'
+      responses:
+        '200':
+          description: その年の国民の祝日。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NationalHolidayYear'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+        - service-settings
+      operationId: putNationalHolidays
+      x-module: Ops
+      summary: 国民の祝日の一覧を登録する
+      description: |
+        毎年、政府の公表にもとづいて翌年の一覧を登録する（UC-OP-04）。テナントのカレンダーには自動では反映せず、テナント管理者が
+        一括設定で取り込む（applyNationalHolidays）。法改正で祝日が変わった場合は、テナント管理者にメールで知らせる。
+      parameters:
+        - $ref: '#/components/parameters/Year'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NationalHolidayYear'
+      responses:
+        '200':
+          description: 登録した一覧。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NationalHolidayYear'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    sigv4:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: AWS の署名バージョン4。API Gateway のルートで IAM 認証を使い、運営者の IAM ロールにだけ `execute-api:Invoke` を許可する。
+      x-amazon-apigateway-authtype: awsSigv4
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    Year:
+      name: year
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 2000
+        maximum: 2100
+    Limit:
+      name: limit
+      in: query
+      description: 1回に返す件数（既定 50、最大 100）。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    NextToken:
+      name: nextToken
+      in: query
+      description: 前の応答の `nextToken`。続きを取得するときに指定する。有効期限は1時間で、期限を過ぎたものや、ほかの一覧・ほかの絞り込みの条件で得たものは 400（`VALIDATION_FAILED`）になる。そのときは最初のページから取り直す。
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        冪等キー。画面が操作ごとに作り（UUID または ULID）、再送でも同じ値を送る。
+        同じキーの再送には最初の結果を返す。同じキーで内容が違う要求は 422（IDEMPOTENCY_KEY_REUSED）、最初の要求の処理中に届いた再送は 409（IDEMPOTENCY_KEY_IN_PROGRESS）。キーは24時間保持する。
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 64
+    EmployeeId:
+      name: employeeId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Ulid'
+  schemas:
+    TenantStatus:
+      type: string
+      enum:
+        - active
+        - suspended
+    Tenant:
+      type: object
+      required:
+        - tenantId
+        - tenantCode
+        - name
+        - timeZone
+        - status
+        - activeEmployeeCount
+        - createdAt
+      properties:
+        tenantId:
+          $ref: '#/components/schemas/Ulid'
+        tenantCode:
+          type: string
+        name:
+          type: string
+        timeZone:
+          type: string
+          examples:
+            - Asia/Tokyo
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+        suspendedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        suspendReason:
+          type:
+            - string
+            - 'null'
+        activeEmployeeCount:
+          type: integer
+          description: 在籍中の従業員の数（利用料の計算に使う）。
+        createdAt:
+          type: string
+          format: date-time
+    TenantList:
+      type: object
+      description: テナントの一覧。
+      required:
+        - items
+        - nextToken
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+        nextToken:
+          $ref: '#/components/schemas/PageToken'
+    TenantCreate:
+      type: object
+      required:
+        - tenantCode
+        - name
+        - firstAdmin
+      properties:
+        tenantCode:
+          type: string
+          pattern: ^[A-Za-z0-9]{3,20}$
+          description: 企業コード。全テナントで一意（大文字と小文字は区別しない）。後から変えられない。
+        name:
+          type: string
+          maxLength: 100
+        firstAdmin:
+          type: object
+          description: 最初のテナント管理者。従業員として登録し、招待メールを送る。
+          required:
+            - employeeCode
+            - familyName
+            - givenName
+            - email
+          properties:
+            employeeCode:
+              type: string
+              maxLength: 20
+            familyName:
+              type: string
+              maxLength: 50
+            givenName:
+              type: string
+              maxLength: 50
+            email:
+              type: string
+              format: email
+            hireDate:
+              type: string
+              format: date
+              description: 入社日。省略すると開設の日。
+        payrollClosingDay:
+          type: integer
+          minimum: 0
+          maximum: 28
+          description: 給与の締め日（0 は末日）。省略すると末日。
+    OperatorReason:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+    MfaResetRequest:
+      type: object
+      required:
+        - reason
+        - verification
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+        verification:
+          type: object
+          description: 本人確認の記録。
+          required:
+            - method
+            - note
+          properties:
+            method:
+              type: string
+              enum:
+                - callbackToRegisteredPhone
+                - documentCheck
+                - other
+            note:
+              type: string
+              maxLength: 500
+    StatutoryParameters:
+      type: object
+      description: 法定値（全テナントで共通）。値は分または日。
+      required:
+        - dailyLegalMinutes
+        - weeklyLegalMinutes
+        - weeklyLegalMinutesSpecial
+        - nightWindow
+        - breakRules
+        - monthlyPremiumThresholdMinutes
+        - overtimeLimits
+        - healthCheckThresholdMinutes
+        - annualLeaveGrantTable
+        - hourlyLeaveCapDays
+      properties:
+        dailyLegalMinutes:
+          $ref: '#/components/schemas/Minutes'
+          description: 1日の法定労働時間（480）。
+        weeklyLegalMinutes:
+          $ref: '#/components/schemas/Minutes'
+          description: 1週の法定労働時間（2400）。
+        weeklyLegalMinutesSpecial:
+          $ref: '#/components/schemas/Minutes'
+          description: 特例事業場の1週の法定労働時間（2640）。
+        nightWindow:
+          type: object
+          description: 深夜の時間帯。暦日の 0:00 からの分で、日をまたぐ（1320〜300 = 22:00〜5:00）。
+          required:
+            - startMinute
+            - endMinute
+          properties:
+            startMinute:
+              type: integer
+              minimum: 0
+              maximum: 1439
+            endMinute:
+              type: integer
+              minimum: 0
+              maximum: 1439
+        breakRules:
+          type: array
+          description: 休憩の基準（労働時間が超えたら必要な休憩）。360 分超で 45 分、480 分超で 60 分。
+          items:
+            type: object
+            required:
+              - workedMinutesOver
+              - breakMinutes
+            properties:
+              workedMinutesOver:
+                $ref: '#/components/schemas/Minutes'
+              breakMinutes:
+                $ref: '#/components/schemas/Minutes'
+        monthlyPremiumThresholdMinutes:
+          $ref: '#/components/schemas/Minutes'
+          description: 月60時間を超える時間外の割増の基準（3600）。
+        overtimeLimits:
+          type: object
+          description: 36協定の上限。
+          required:
+            - monthlyLimitMinutes
+            - annualLimitMinutes
+            - specialAnnualMaxMinutes
+            - specialMonthlyMaxMinutesExclusive
+            - multiMonthAverageMaxMinutes
+            - specialClauseMaxMonths
+          properties:
+            monthlyLimitMinutes:
+              $ref: '#/components/schemas/Minutes'
+              description: 限度時間（月）2700。
+            annualLimitMinutes:
+              $ref: '#/components/schemas/Minutes'
+              description: 限度時間（年）21600。
+            specialAnnualMaxMinutes:
+              $ref: '#/components/schemas/Minutes'
+              description: 特別条項の年の上限（時間外）43200。
+            specialMonthlyMaxMinutesExclusive:
+              $ref: '#/components/schemas/Minutes'
+              description: 単月の上限（時間外＋休日。この値未満）6000。
+            multiMonthAverageMaxMinutes:
+              $ref: '#/components/schemas/Minutes'
+              description: 2〜6か月平均の上限（時間外＋休日）4800。
+            specialClauseMaxMonths:
+              type: integer
+              description: 限度時間を超えられる月数（6）。
+        healthCheckThresholdMinutes:
+          $ref: '#/components/schemas/Minutes'
+          description: 安衛法の面接指導の基準（4800）。
+        annualLeaveGrantTable:
+          type: object
+          description: 年休の付与日数表。勤続0.5年、1.5年、2.5年、3.5年、4.5年、5.5年、6.5年以上の7段階。
+          required:
+            - normal
+            - proportional
+          properties:
+            normal:
+              $ref: '#/components/schemas/GrantDaysRow'
+            proportional:
+              type: object
+              description: 比例付与。キーは週の所定労働日数（1〜4）。ほかのキーは読み飛ばす。
+              required:
+                - '1'
+                - '2'
+                - '3'
+                - '4'
+              properties:
+                '1':
+                  $ref: '#/components/schemas/GrantDaysRow'
+                '2':
+                  $ref: '#/components/schemas/GrantDaysRow'
+                '3':
+                  $ref: '#/components/schemas/GrantDaysRow'
+                '4':
+                  $ref: '#/components/schemas/GrantDaysRow'
+              examples:
+                - '1':
+                    - 1
+                    - 2
+                    - 2
+                    - 2
+                    - 3
+                    - 3
+                    - 3
+                  '2':
+                    - 3
+                    - 4
+                    - 4
+                    - 5
+                    - 6
+                    - 6
+                    - 7
+                  '3':
+                    - 5
+                    - 6
+                    - 6
+                    - 8
+                    - 9
+                    - 10
+                    - 11
+                  '4':
+                    - 7
+                    - 8
+                    - 9
+                    - 10
+                    - 12
+                    - 13
+                    - 15
+        hourlyLeaveCapDays:
+          type: integer
+          description: 時間単位年休の上限（年5日）。
+    GrantDaysRow:
+      type: array
+      description: 勤続年数の7段階ごとの付与日数。
+      items:
+        type: integer
+        minimum: 0
+      minItems: 7
+      maxItems: 7
+      examples:
+        - - 10
+          - 11
+          - 12
+          - 14
+          - 16
+          - 18
+          - 20
+    StatutoryParametersVersionCreate:
+      type: object
+      required:
+        - effectiveFrom
+        - basis
+        - parameters
+      properties:
+        effectiveFrom:
+          type: string
+          format: date
+          description: 施行日。
+        basis:
+          type: string
+          maxLength: 500
+          description: 根拠（法令・通達の名前と番号）。
+        parameters:
+          $ref: '#/components/schemas/StatutoryParameters'
+    StatutoryParametersVersion:
+      allOf:
+        - $ref: '#/components/schemas/StatutoryParametersVersionCreate'
+        - type: object
+          required:
+            - versionId
+            - status
+            - createdAt
+          properties:
+            versionId:
+              $ref: '#/components/schemas/Ulid'
+            status:
+              type: string
+              enum:
+                - active
+                - cancelled
+            createdAt:
+              type: string
+              format: date-time
+    StatutoryParametersVersionList:
+      type: object
+      description: 法定値の版の一覧（施行日の古い順）。
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatutoryParametersVersion'
+    NationalHolidayYear:
+      type: object
+      required:
+        - year
+        - holidays
+        - source
+      properties:
+        year:
+          type: integer
+        holidays:
+          type: array
+          items:
+            type: object
+            required:
+              - date
+              - name
+            properties:
+              date:
+                type: string
+                format: date
+              name:
+                type: string
+                examples:
+                  - 元日
+        source:
+          type: string
+          description: 出典（政府の公表）。
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+    Ulid:
+      type: string
+      description: ULID（26文字）。
+      pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      examples:
+        - 01J9ZK3M8Q6W2E4R5T7Y9V1H0P
+    PageToken:
+      type:
+        - string
+        - 'null'
+      description: 続きがあれば、次の要求の `nextToken` に指定する値（中身を解釈しない文字列。有効期限は1時間）。続きがなければ null。
+    NullableUlid:
+      type:
+        - string
+        - 'null'
+      description: ULID（26文字）。値がなければ null。
+      pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+    ValidationIssue:
+      type: object
+      description: 検証の結果（エラーまたは警告）。入力の誤りでは `field` に項目の位置を入れる。
+      required:
+        - severity
+        - code
+        - message
+      properties:
+        severity:
+          type: string
+          enum:
+            - error
+            - warning
+        code:
+          type: string
+        message:
+          type: string
+        employeeId:
+          $ref: '#/components/schemas/NullableUlid'
+        workDate:
+          type:
+            - string
+            - 'null'
+          format: date
+          description: 対象の勤務日。なければ null。
+        field:
+          type:
+            - string
+            - 'null'
+          description: 項目の位置（本文は JSON Pointer。例 `/leave/from`。ヘッダーとクエリは名前。例 `Idempotency-Key`、`nextToken`）。なければ null。
+    Problem:
+      type: object
+      description: エラー（RFC 9457 Problem Details にアプリのコードを加えたもの）。
+      required:
+        - type
+        - title
+        - status
+        - instance
+        - code
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: エラーの種類を表す URI。`/problems/` に、コードを小文字のハイフン区切りにしたものを付ける（例 `/problems/period-closed`）。
+        title:
+          type: string
+          description: 利用者向けの短い文言（日本語）。
+        status:
+          type: integer
+        detail:
+          type:
+            - string
+            - 'null'
+          description: 補足の説明。なければ null。
+        instance:
+          type: string
+          description: 調査用の要求の ID（API Gateway の要求の ID）。
+        code:
+          type: string
+          description: アプリのエラーコード（API の README のコード一覧を参照）。
+          examples:
+            - PUNCH_SEQUENCE_INVALID
+        errors:
+          type:
+            - array
+            - 'null'
+          description: 個々の誤り（入力の誤り、シフト表の検証のエラーなど）。なければ null。
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+    Minutes:
+      type: integer
+      minimum: 0
+      description: 時間の量（分）。
+  responses:
+    Forbidden:
+      description: 権限がない（FORBIDDEN）。管理機能の再認証が必要（REAUTH_REQUIRED）、テナントの停止（TENANT_SUSPENDED）も 403 で返す。
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    BadRequest:
+      description: 入力の誤り（VALIDATION_FAILED）。`errors` に項目ごとの誤りを入れる。
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: 対象が見つからない（NOT_FOUND）。権限の範囲外のものも 404 として返す。
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  headers:
+    Location:
+      description: 作成したリソース、またはジョブの URL。
+      schema:
+        type: string

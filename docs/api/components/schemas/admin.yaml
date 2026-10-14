@@ -1,0 +1,504 @@
+# 管理機能・共有端末の型
+Dashboard:
+  type: object
+  required: [currentPeriod, counts]
+  properties:
+    currentPeriod:
+      type: object
+      required: [period, closed]
+      properties:
+        period:
+          $ref: common.yaml#/Period
+        closed:
+          type: boolean
+    counts:
+      $ref: "#/DashboardCounts"
+DashboardCounts:
+  type: object
+  description: ダッシュボードの件数。
+  required: [unresolvedErrors, pendingRequests, alerts]
+  properties:
+    unresolvedErrors:
+      type: integer
+    pendingRequests:
+      type: integer
+    alerts:
+      type: object
+      description: アラートの種類（AlertKind）ごとの未対応の件数。
+      additionalProperties:
+        type: integer
+TimesheetListItem:
+  type: object
+  required: [employee, departmentId, workDays, results, errorCount, alertCount]
+  properties:
+    employee:
+      $ref: common.yaml#/EmployeeRef
+    departmentId:
+      $ref: common.yaml#/Ulid
+    workDays:
+      type: integer
+    absenceDays:
+      type: integer
+    results:
+      $ref: attendance.yaml#/DailyResults
+    leaveDays:
+      type: number
+    errorCount:
+      type: integer
+    alertCount:
+      type: integer
+    pendingRequestCount:
+      type: integer
+AdjustmentCreate:
+  type: object
+  description: 管理者による勤怠の補正（UC-AD-03）。
+  required: [operations, reason]
+  properties:
+    operations:
+      type: array
+      minItems: 1
+      items:
+        $ref: attendance.yaml#/AdjustmentOperation
+    reason:
+      type: string
+      minLength: 1
+      maxLength: 500
+ShiftAssignment:
+  type: object
+  description: シフト表のセル。勤務パターンか休日の種類のどちらか。
+  required: [employeeId, workDate]
+  properties:
+    employeeId:
+      $ref: common.yaml#/Ulid
+    workDate:
+      type: string
+      format: date
+    workPatternId:
+      $ref: common.yaml#/NullableUlid
+    dayType:
+      oneOf:
+        - $ref: common.yaml#/DayType
+        - type: "null"
+ShiftPlan:
+  type: object
+  required: [departmentId, period, status, assignments, validation]
+  properties:
+    departmentId:
+      $ref: common.yaml#/Ulid
+    period:
+      $ref: common.yaml#/Period
+    status:
+      type: string
+      enum: [none, draft, published]
+    assignments:
+      type: array
+      items:
+        $ref: "#/ShiftAssignment"
+    validation:
+      type: array
+      items:
+        $ref: common.yaml#/ValidationIssue
+    publishedAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+    publishedBy:
+      oneOf:
+        - $ref: common.yaml#/EmployeeRef
+        - type: "null"
+    etag:
+      $ref: common.yaml#/ETagValue
+ShiftPlanUpsert:
+  type: object
+  description: 下書きの保存（セルをすべて置き換える）。
+  required: [assignments]
+  properties:
+    assignments:
+      type: array
+      items:
+        $ref: "#/ShiftAssignment"
+ShiftPlanPublishResult:
+  type: object
+  required: [publishedAt, warnings, notifiedEmployeeCount]
+  properties:
+    publishedAt:
+      type: string
+      format: date-time
+    warnings:
+      type: array
+      items:
+        $ref: common.yaml#/ValidationIssue
+    notifiedEmployeeCount:
+      type: integer
+ImportResult:
+  type: object
+  description: CSV の取込の検証結果。誤りがあれば何も反映しない。
+  required: [applied, issues]
+  properties:
+    applied:
+      type: boolean
+    counts:
+      $ref: "#/ImportCounts"
+    issues:
+      type: array
+      items:
+        $ref: "#/ImportIssue"
+    importId:
+      $ref: common.yaml#/NullableUlid
+      description: 従業員の取込の検証（previewEmployeeImport）で返す。反映するときに指定する。
+ImportCounts:
+  type: object
+  description: 取込の行数（新規・更新・誤り）。
+  required: [create, update, error]
+  properties:
+    create:
+      type: integer
+    update:
+      type: integer
+    error:
+      type: integer
+ImportIssue:
+  type: object
+  description: 取込の誤り。
+  required: [row, message]
+  properties:
+    row:
+      type: integer
+      description: 行番号（見出しの行を1とする）。
+    column:
+      type: string
+    value:
+      type: string
+    message:
+      type: string
+ScheduleChange:
+  type: object
+  description: 公開後の勤務予定の変更（UC-AD-06）。勤務パターンか休日の種類のどちらか。
+  required: [reasonCode]
+  properties:
+    workPatternId:
+      $ref: common.yaml#/Ulid
+    dayType:
+      $ref: common.yaml#/DayType
+    reasonCode:
+      type: string
+      description: テナント設定のシフトの変更事由のコード。
+    note:
+      type: string
+      maxLength: 200
+CloseScope:
+  type: object
+  required: [type]
+  properties:
+    type:
+      type: string
+      enum: [all, department]
+    departmentId:
+      $ref: common.yaml#/Ulid
+      description: "`department` のときの部署（配下を含む）。"
+PeriodCloseStatus:
+  type: object
+  required: [period, scope, status, precheck]
+  properties:
+    period:
+      $ref: common.yaml#/Period
+    scope:
+      $ref: "#/CloseScope"
+    status:
+      type: string
+      enum: [open, closed, partiallyClosed]
+    closableAt:
+      type: string
+      format: date-time
+      description: 締められるようになる日時。期間の末日の打刻の受付期限の後。
+    precheck:
+      type: object
+      required: [errors, pendingRequests, warnings]
+      properties:
+        errors:
+          type: array
+          description: 締めを止めるエラー（打刻漏れなど）。
+          items:
+            $ref: common.yaml#/ValidationIssue
+        pendingRequests:
+          type: array
+          description: 締めを止める申請（承認待ち・差戻し中・取消の承認待ち）。
+          items:
+            $ref: workflow.yaml#/RequestSummary
+        warnings:
+          type: array
+          description: 締めは止めない警告。
+          items:
+            $ref: common.yaml#/ValidationIssue
+    history:
+      type: array
+      items:
+        type: object
+        properties:
+          action:
+            type: string
+            enum: [close, reopen]
+          scope:
+            $ref: "#/CloseScope"
+          actor:
+            $ref: common.yaml#/EmployeeRef
+          reason:
+            type:
+              - string
+              - "null"
+          at:
+            type: string
+            format: date-time
+PeriodCloseRequest:
+  type: object
+  required: [scope]
+  properties:
+    scope:
+      $ref: "#/CloseScope"
+PeriodReopenRequest:
+  type: object
+  required: [scope, reason]
+  properties:
+    scope:
+      $ref: "#/CloseScope"
+    reason:
+      type: string
+      minLength: 1
+      maxLength: 500
+ExportRequest:
+  type: object
+  description: CSV の出力（UC-AD-08）。
+  required: [type, scope]
+  properties:
+    type:
+      type: string
+      enum: [monthlySummary, dailyDetail, annualLeaveRegister, longHoursList]
+    period:
+      $ref: common.yaml#/PeriodId
+      description: "`monthlySummary`・`dailyDetail`・`longHoursList` の期間（`longHoursList` も給与の締め期間）。"
+    from:
+      type: string
+      format: date
+      description: "`annualLeaveRegister` の対象期間の開始。"
+    to:
+      type: string
+      format: date
+    scope:
+      $ref: "#/CloseScope"
+    format:
+      $ref: common.yaml#/CsvFormat
+      description: 省略するとテナントの既定。
+    closeVersion:
+      type: integer
+      minimum: 1
+      description: "`monthlySummary` で使う締めの版。省略すると最新の版。締めていない期間には指定できない。"
+AlertKind:
+  type: string
+  enum:
+    - missingPunch
+    - absenceSuspected
+    - insufficientBreak
+    - clientTimeSkew
+    - legalHolidayNotSecured
+    - overtimeAgreement
+    - healthOver80h
+    - annualLeaveObligationBehind
+    - leaveGrantHeld
+    - flexShortage
+    - coreTimeMissing
+    - variableScheduleLate
+    - refreshTokenReuse
+Alert:
+  type: object
+  required: [alertId, kind, severity, message, status, createdAt]
+  properties:
+    alertId:
+      $ref: common.yaml#/Ulid
+    kind:
+      $ref: "#/AlertKind"
+    severity:
+      type: string
+      enum: [info, warning, error]
+    employee:
+      oneOf:
+        - $ref: common.yaml#/EmployeeRef
+        - type: "null"
+    workDate:
+      type:
+        - string
+        - "null"
+      format: date
+    message:
+      type: string
+    details:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: "#/AlertStatus"
+    note:
+      type:
+        - string
+        - "null"
+    acknowledgedBy:
+      oneOf:
+        - $ref: common.yaml#/EmployeeRef
+        - type: "null"
+    createdAt:
+      type: string
+      format: date-time
+AlertStatus:
+  type: string
+  description: アラートの状態（未対応、対応済み、解消）。
+  enum: [open, acknowledged, resolved]
+AlertAcknowledge:
+  type: object
+  properties:
+    note:
+      type: string
+      maxLength: 500
+AuditLogEntry:
+  type: object
+  required: [auditId, at, actor, action, targetType]
+  properties:
+    auditId:
+      $ref: common.yaml#/Ulid
+    at:
+      type: string
+      format: date-time
+    actor:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [user, system, operator, device]
+        employee:
+          oneOf:
+            - $ref: common.yaml#/EmployeeRef
+            - type: "null"
+        deviceId:
+          $ref: common.yaml#/NullableUlid
+    action:
+      type: string
+      examples:
+        - attendance.adjust
+    targetType:
+      type: string
+      examples:
+        - dailyAttendance
+    targetId:
+      type:
+        - string
+        - "null"
+    summary:
+      type: string
+    before:
+      type:
+        - object
+        - "null"
+      additionalProperties: true
+    after:
+      type:
+        - object
+        - "null"
+      additionalProperties: true
+    ip:
+      type:
+        - string
+        - "null"
+KioskStatusRequest:
+  type: object
+  required: [employeeCode, pin]
+  properties:
+    employeeCode:
+      type: string
+    pin:
+      type: string
+      pattern: "^[0-9]{4,6}$"
+      writeOnly: true
+KioskStatus:
+  type: object
+  required: [employeeName, today, kioskSession, pinChangeRequired]
+  properties:
+    employeeName:
+      type: string
+    today:
+      $ref: attendance.yaml#/Today
+    kioskSession:
+      type: object
+      required: [token, expiresAt]
+      description: その従業員の打刻にだけ使える受付（60秒）。
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    pinChangeRequired:
+      type: boolean
+      description: 初期 PIN のため、打刻の前に変更が必要。
+KioskPinChange:
+  type: object
+  required: [kioskSessionToken, newPin]
+  properties:
+    kioskSessionToken:
+      type: string
+    newPin:
+      type: string
+      pattern: "^[0-9]{4,6}$"
+      writeOnly: true
+KioskPunchRequest:
+  type: object
+  required: [kioskSessionToken, type]
+  properties:
+    kioskSessionToken:
+      type: string
+    type:
+      $ref: attendance.yaml#/PunchType
+KioskPunchResponse:
+  type: object
+  required: [employeeName, punch]
+  properties:
+    employeeName:
+      type: string
+    punch:
+      $ref: attendance.yaml#/Punch
+TimesheetFilter:
+  type: string
+  description: 勤怠の一覧の絞り込み（エラーあり、承認待ちあり、アラートあり）。
+  enum: [hasErrors, hasPendingRequests, hasAlerts]
+TimesheetList:
+  type: object
+  description: 従業員ごとの集計の一覧。
+  required: [period, items, nextToken]
+  properties:
+    period:
+      $ref: common.yaml#/Period
+    items:
+      type: array
+      items:
+        $ref: "#/TimesheetListItem"
+    nextToken:
+      $ref: common.yaml#/PageToken
+AlertList:
+  type: object
+  description: アラートの一覧（新しい順）。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Alert"
+    nextToken:
+      $ref: common.yaml#/PageToken
+AuditLogList:
+  type: object
+  description: 監査ログの一覧（新しい順）。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/AuditLogEntry"
+    nextToken:
+      $ref: common.yaml#/PageToken

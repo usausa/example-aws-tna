@@ -1,0 +1,405 @@
+# 管理: 休暇（/api/v1/admin）。bearerAuth の admin スコープ。自分自身の休暇は操作できない（SELF_OPERATION_NOT_ALLOWED）。
+leaveGrantPlans:
+  get:
+    tags: [admin-leave]
+    operationId: listLeaveGrantPlans
+    x-module: AdminOps
+    summary: 有給の付与予定を取得する
+    description: 7日先までの付与予定と、判定の根拠を返す（UC-AD-10）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: ../components/schemas/leave.yaml#/LeaveGrantPlanStatus
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+      - $ref: ../components/parameters.yaml#/FromDate
+      - $ref: ../components/parameters.yaml#/ToDate
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 付与予定。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveGrantPlanList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+leaveGrantPlanDecision:
+  post:
+    tags: [admin-leave]
+    operationId: decideLeaveGrantPlan
+    x-module: AdminOps
+    summary: 保留の付与予定について判断する
+    description: 付与する（approve）か付与しない（decline。理由必須）かを決める（UC-AD-10）。付与は付与日に定時処理で行う。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveGrantPlanDecision
+    responses:
+      "200":
+        description: 判断後の付与予定。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveGrantPlan
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+leaveBalances:
+  get:
+    tags: [admin-leave]
+    operationId: listLeaveBalances
+    x-module: AdminOps
+    summary: 従業員別の休暇の残りを取得する
+    description: 管理範囲の従業員の、1つの休暇種別の残り・失効予定・年5日の状態を返す（AD08）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: leaveTypeId
+        in: query
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+      - $ref: ../components/parameters.yaml#/IncludeDescendants
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 従業員別の残り。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/EmployeeLeaveBalanceList
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+employeeLeave:
+  get:
+    tags: [admin-leave]
+    operationId: getEmployeeLeave
+    x-module: AdminOps
+    summary: 従業員の休暇の残りを取得する
+    description: 従業員の休暇種別ごとの残り、付与ロット、年5日の進捗を返す（UC-AD-11、AD08）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "200":
+        description: 休暇の状況。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/MyLeave
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+employeeLeaveGrants:
+  post:
+    tags: [admin-leave]
+    operationId: createLeaveGrant
+    x-module: AdminOps
+    summary: 休暇を手動で付与する
+    description: 理由を記録して付与ロットを作り、本人に知らせる（UC-AD-11）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/ManualGrantCreate
+    responses:
+      "201":
+        description: 付与した。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveLot
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+employeeLeaveAdjustments:
+  post:
+    tags: [admin-leave]
+    operationId: createLeaveAdjustment
+    x-module: AdminOps
+    summary: 休暇の残りを調整する
+    description: 理由を記録して増減する（UC-AD-11）。残りが負になる調整はできない。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveAdjustmentCreate
+    responses:
+      "201":
+        description: 調整後の休暇の状況。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/MyLeave
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "422":
+        description: 残りが負になる（LEAVE_BALANCE_INSUFFICIENT）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+leaveObligations:
+  get:
+    tags: [admin-leave]
+    operationId: listLeaveObligations
+    x-module: AdminOps
+    summary: 年5日の取得義務の進捗を取得する
+    description: 期間・必要な日数・取得済み・残り・期限を返す（UC-AD-12）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: ../components/schemas/leave.yaml#/LeaveObligationStatus
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 取得義務の一覧。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveObligationList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+employeeLeaveDesignations:
+  post:
+    tags: [admin-leave]
+    operationId: createLeaveDesignation
+    x-module: AdminOps
+    summary: 時季指定を登録する
+    description: 指定した日を承認済みの年次有給休暇として記録し、本人に知らせる（UC-AD-12）。本人の意見を聴いた記録が必要。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveDesignationCreate
+    responses:
+      "201":
+        description: 登録した。記録した休暇（承認済みの申請）を返す。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/Request
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        $ref: ../components/responses.yaml#/Conflict
+      "422":
+        $ref: ../components/responses.yaml#/UnprocessableEntity
+employeeStatutoryEntitlement:
+  put:
+    tags: [admin-leave]
+    operationId: putStatutoryEntitlement
+    x-module: AdminOps
+    summary: 子の看護等休暇・介護休暇の年度の日数を登録する
+    description: 年度ごとの日数（5日または10日）と、労使協定による対象外を登録する（UC-AD-13）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - name: leaveTypeId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: fiscalYear
+        in: path
+        required: true
+        schema:
+          type: integer
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/StatutoryEntitlement
+    responses:
+      "200":
+        description: 登録した内容。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/StatutoryEntitlement
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+employeeLeavesOfAbsence:
+  get:
+    tags: [admin-leave]
+    operationId: listLeavesOfAbsence
+    x-module: AdminOps
+    summary: 従業員の休業の一覧を取得する
+    description: 休業（産前産後・育児・出生時育児・介護休業、業務災害による休業、休職）の期間を返す（UC-SE-17）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+    responses:
+      "200":
+        description: 休業の一覧（開始日の順）。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveOfAbsenceList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  post:
+    tags: [admin-leave]
+    operationId: createLeaveOfAbsence
+    x-module: AdminOps
+    summary: 休業を登録する
+    description: |
+      休業の種類と期間を登録する（UC-SE-17）。休業中の日は欠勤や打刻漏れにしない。有給の出勤率では、法令で出勤と
+      みなす休業（産前産後・育児・出生時育児・介護・業務災害）を出勤として数え、休職は登録した扱いに従う。締め済みの期間に
+      かかる期間（PERIOD_CLOSED）や、ほかの休業と重なる期間（LEAVE_OF_ABSENCE_OVERLAP）は登録できない。期間の締めていない
+      勤務日を計算し直す。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveOfAbsence
+    responses:
+      "201":
+        description: 登録した休業。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveOfAbsence
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締め済みの期間にかかる、またはほかの休業と重なる（PERIOD_CLOSED、LEAVE_OF_ABSENCE_OVERLAP）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+employeeLeaveOfAbsence:
+  patch:
+    tags: [admin-leave]
+    operationId: updateLeaveOfAbsence
+    x-module: AdminOps
+    summary: 休業を変更する
+    description: 終了日などを変える（UC-SE-17）。変えた範囲の締めていない勤務日を計算し直す。締め済みの期間にかかる変更はできない（PERIOD_CLOSED）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - name: leaveOfAbsenceId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/leave.yaml#/LeaveOfAbsence
+    responses:
+      "200":
+        description: 変更後の休業。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/leave.yaml#/LeaveOfAbsence
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締め済みの期間にかかる、またはほかの休業と重なる（PERIOD_CLOSED、LEAVE_OF_ABSENCE_OVERLAP）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+  delete:
+    tags: [admin-leave]
+    operationId: deleteLeaveOfAbsence
+    x-module: AdminOps
+    summary: 休業を削除する
+    description: 誤って登録した休業を消す（UC-SE-17）。締め済みの期間にかかる休業は消せない（PERIOD_CLOSED）。期間の締めていない勤務日を計算し直す。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - name: leaveOfAbsenceId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/IfMatch
+    responses:
+      "204":
+        description: 削除した。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 締め済みの期間にかかる（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed

@@ -1,0 +1,25 @@
+# 共通のヘッダー
+ETag:
+  description: リソースの版。更新するときに If-Match で送る。
+  schema:
+    type: string
+RetryAfter:
+  description: 再送まで待つ秒数。
+  schema:
+    type: integer
+    minimum: 1
+Location:
+  description: 作成したリソース、またはジョブの URL。
+  schema:
+    type: string
+SetCookieRefresh:
+  description: |
+    リフレッシュトークンの Cookie。`__Secure-tna_rt`、`Path=/auth`、`HttpOnly`、`Secure`、`SameSite=Strict`。
+    ログアウトでは期限切れの値で上書きして消す。
+  schema:
+    type: string
+SetCookieDevice:
+  description: |
+    共有端末の資格情報の Cookie。`__Secure-tna_device`、`Path=/auth/v1/kiosk`、`HttpOnly`、`Secure`、`SameSite=Strict`、有効期間365日。
+  schema:
+    type: string

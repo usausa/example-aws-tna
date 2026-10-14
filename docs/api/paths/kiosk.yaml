@@ -1,0 +1,107 @@
+# 共有端末（/api/v1/kiosk）。bearerAuth の kiosk スコープ（端末用のアクセストークン）。
+kioskSessions:
+  post:
+    tags: [kiosk]
+    operationId: createKioskSession
+    x-module: Auth
+    summary: 社員番号と PIN を照合し、受付と当日の状態を取得する
+    description: |
+      照合に成功すると、その従業員の打刻にだけ使える受付（60秒）を返す（UC-KI-02）。
+      PIN の誤りが続くと、従業員単位と端末単位で受付を止める（KIOSK_PIN_LOCKED）。PIN を URL に載せないため POST にする。
+    security:
+      - bearerAuth: [kiosk]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/KioskStatusRequest
+    responses:
+      "200":
+        description: 従業員の当日の状態と受付。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/KioskStatus
+      "401":
+        description: 社員番号または PIN の誤り（KIOSK_PIN_INVALID）、端末の失効（DEVICE_REVOKED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "423":
+        description: PIN の誤りが続いたため一時的に受け付けない（KIOSK_PIN_LOCKED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests
+kioskPin:
+  post:
+    tags: [kiosk]
+    operationId: changeKioskPin
+    x-module: Auth
+    summary: 初期 PIN を変更する
+    description: 初期 PIN で照合した従業員が、新しい PIN を設定する（UC-KI-03）。
+    security:
+      - bearerAuth: [kiosk]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/KioskPinChange
+    responses:
+      "204":
+        description: 変更した。
+      "401":
+        description: 受付の期限切れ（KIOSK_SESSION_EXPIRED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "422":
+        description: 単純すぎる PIN（PIN_TOO_WEAK）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+kioskPunches:
+  post:
+    tags: [kiosk]
+    operationId: createKioskPunch
+    x-module: Punch
+    summary: 共有端末で打刻する
+    description: 受付の従業員の打刻を記録する（UC-KI-02）。打刻手段は `kiosk`、位置は端末の設置場所とする。
+    security:
+      - bearerAuth: [kiosk]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/KioskPunchRequest
+    responses:
+      "201":
+        description: 記録した。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/KioskPunchResponse
+      "401":
+        description: 受付の期限切れ（KIOSK_SESSION_EXPIRED）、端末の失効（DEVICE_REVOKED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "409":
+        description: 状態に合わない（PUNCH_SEQUENCE_INVALID）、締め済み（PERIOD_CLOSED）、在籍外（EMPLOYEE_INACTIVE）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "429":
+        $ref: ../components/responses.yaml#/TooManyRequests

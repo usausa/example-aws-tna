@@ -1,0 +1,233 @@
+# 認証の型
+LoginRequest:
+  type: object
+  required: [tenantCode, loginId, password]
+  properties:
+    tenantCode:
+      type: string
+      pattern: "^[A-Za-z0-9]{3,20}$"
+    loginId:
+      type: string
+      description: メールアドレス、またはメールのない従業員は社員番号。
+      maxLength: 254
+    password:
+      type: string
+      maxLength: 128
+      writeOnly: true
+LoginResponse:
+  type: object
+  description: ログインの結果。`status` で分ける。
+  required: [status]
+  properties:
+    status:
+      type: string
+      enum: [authenticated, mfaRequired, passwordChangeRequired]
+  discriminator:
+    propertyName: status
+    mapping:
+      authenticated: "#/AuthenticatedResult"
+      mfaRequired: "#/MfaRequiredResult"
+      passwordChangeRequired: "#/PasswordChangeRequiredResult"
+AuthenticatedResult:
+  description: 認証が完了した（`status` は `authenticated`）。リフレッシュトークンは Set-Cookie で返す。
+  allOf:
+    - $ref: "#/LoginResponse"
+    - type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+          description: JWT（RS256）。画面のメモリにだけ置く。
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          description: アクセストークンの有効期間（秒）。
+          examples:
+            - 900
+        scope:
+          type: string
+          description: 空白区切りのスコープ。管理機能の再認証が有効な間は `admin` を含む。
+          examples:
+            - employee
+MfaRequiredResult:
+  description: パスワードは正しく、TOTP の確認が必要（`status` は `mfaRequired`）。
+  allOf:
+    - $ref: "#/LoginResponse"
+    - type: object
+      required: [mfaToken, expiresIn]
+      properties:
+        mfaToken:
+          type: string
+          description: 二要素認証の途中の状態を表す値（5分有効）。
+        expiresIn:
+          type: integer
+PasswordChangeRequiredResult:
+  description: |
+    管理者が発行した初期パスワードか、TOTP がなく15文字に満たないパスワード（管理者が TOTP を解除した後）でログインした。
+    パスワードの変更が必要（`status` は `passwordChangeRequired`）。
+  allOf:
+    - $ref: "#/LoginResponse"
+    - type: object
+      required: [changeToken, expiresIn]
+      properties:
+        changeToken:
+          type: string
+        expiresIn:
+          type: integer
+MfaVerifyRequest:
+  type: object
+  required: [mfaToken, code]
+  properties:
+    mfaToken:
+      type: string
+    code:
+      type: string
+      pattern: "^[0-9]{6}$"
+TokenResponse:
+  type: object
+  required: [accessToken, tokenType, expiresIn]
+  properties:
+    accessToken:
+      type: string
+    tokenType:
+      type: string
+      const: Bearer
+    expiresIn:
+      type: integer
+    scope:
+      type: string
+LogoutRequest:
+  type: object
+  properties:
+    allDevices:
+      type: boolean
+      default: false
+      description: すべての端末のセッションを失効させるか。
+PasswordChangeRequest:
+  type: object
+  required: [currentPassword, newPassword]
+  properties:
+    currentPassword:
+      type: string
+      writeOnly: true
+    newPassword:
+      type: string
+      minLength: 8
+      maxLength: 128
+      writeOnly: true
+      description: 長さの条件は TOTP の登録の有無で変わる（認証のユースケース §2.2）。
+PasswordForgotRequest:
+  type: object
+  required: [tenantCode, loginId]
+  properties:
+    tenantCode:
+      type: string
+    loginId:
+      type: string
+PasswordResetRequest:
+  type: object
+  required: [token, newPassword]
+  properties:
+    token:
+      type: string
+      description: 再設定のリンクに含まれる値（30分有効、1回限り）。
+    newPassword:
+      type: string
+      writeOnly: true
+InitialPasswordChangeRequest:
+  type: object
+  required: [changeToken, newPassword]
+  properties:
+    changeToken:
+      type: string
+    newPassword:
+      type: string
+      writeOnly: true
+InvitationInspectRequest:
+  type: object
+  required: [token]
+  properties:
+    token:
+      type: string
+      description: 招待のリンクに含まれる値（72時間有効）。リンクは URL のフラグメントに値を入れ、サーバーのログに残らないようにする。
+InvitationInfo:
+  type: object
+  required: [tenantCode, tenantName, loginId, expiresAt]
+  properties:
+    tenantCode:
+      type: string
+    tenantName:
+      type: string
+    loginId:
+      type: string
+    expiresAt:
+      type: string
+      format: date-time
+InvitationAcceptRequest:
+  type: object
+  required: [token, newPassword]
+  properties:
+    token:
+      type: string
+    newPassword:
+      type: string
+      writeOnly: true
+StepUpRequest:
+  type: object
+  required: [password, code]
+  properties:
+    password:
+      type: string
+      writeOnly: true
+    code:
+      type: string
+      pattern: "^[0-9]{6}$"
+TotpSetupRequest:
+  type: object
+  required: [password]
+  properties:
+    password:
+      type: string
+      writeOnly: true
+      description: 現在のパスワード。
+TotpSetupResponse:
+  type: object
+  required: [secret, otpauthUri, expiresAt]
+  properties:
+    secret:
+      type: string
+      description: Base32 の秘密鍵（画面に一度だけ表示する）。
+    otpauthUri:
+      type: string
+      description: QR コードにする `otpauth://totp/...` の URI。
+    expiresAt:
+      type: string
+      format: date-time
+      description: この時刻までに確認のコードを送らないと、登録の手続きは無効になる。
+TotpConfirmRequest:
+  type: object
+  required: [code]
+  properties:
+    code:
+      type: string
+      pattern: "^[0-9]{6}$"
+KioskRegisterRequest:
+  type: object
+  required: [registrationCode]
+  properties:
+    registrationCode:
+      type: string
+      description: 管理者が発行した登録コード（10分有効、1回限り）。
+      pattern: "^[A-Z0-9]{8}$"
+KioskRegistration:
+  type: object
+  required: [deviceId, deviceName, tenantName]
+  properties:
+    deviceId:
+      $ref: common.yaml#/Ulid
+    deviceName:
+      type: string
+    tenantName:
+      type: string

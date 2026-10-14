@@ -1,0 +1,120 @@
+# 申請の詳細と操作（/api/v1/requests）、承認待ちの一覧（/api/v1/approvals）
+request:
+  get:
+    tags: [requests]
+    operationId: getRequest
+    x-module: Self
+    summary: 申請の詳細を取得する
+    description: |
+      申請者、現在・過去の段の承認者、範囲内の管理者が取得できる（それ以外は 404）。
+      `include=context` を指定すると、承認者と管理者には承認の参考情報（休暇の残り、修正前後の打刻）を返す（UC-WF-03〜09、EM09、AP02）。
+    parameters:
+      - $ref: ../components/parameters.yaml#/RequestId
+      - name: include
+        in: query
+        schema:
+          $ref: ../components/schemas/workflow.yaml#/RequestInclude
+    responses:
+      "200":
+        description: 申請の詳細。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/Request
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+requestActions:
+  post:
+    tags: [requests]
+    operationId: actOnRequest
+    x-module: Self
+    summary: 申請を操作する
+    description: |
+      申請者の取下げ（UC-WF-03）・再申請（UC-WF-04）・取消の申請（UC-WF-05）、承認者の承認・差戻し・却下（UC-WF-07）、
+      取消の承認と却下（UC-WF-08）、管理者の取消（UC-WF-09。`admin` スコープが必要）を行う。
+      最終の承認と取消の承認で、勤怠・休暇への反映（または戻し）を行う。
+    parameters:
+      - $ref: ../components/parameters.yaml#/RequestId
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/workflow.yaml#/RequestActionInput
+          examples:
+            approve:
+              summary: 承認
+              value:
+                action: approve
+            sendBack:
+              summary: 差戻し
+              value:
+                action: sendBack
+                comment: 時刻を確認してください
+    responses:
+      "200":
+        description: 操作後の申請。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/Request
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        description: その操作ができない（自分の申請の承認、範囲外など。ACTION_NOT_ALLOWED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        description: 状態に合わない（REQUEST_STATE_INVALID）、反映先の期間が締め済み（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+      "422":
+        $ref: ../components/responses.yaml#/UnprocessableEntity
+      "428":
+        $ref: ../components/responses.yaml#/PreconditionRequired
+approvals:
+  get:
+    tags: [requests]
+    operationId: listApprovals
+    x-module: Self
+    summary: 承認待ちの申請の一覧を取得する
+    description: 自分が現在の段の承認者になっている申請を、新しい順に返す（UC-WF-06）。
+    parameters:
+      - name: type
+        in: query
+        schema:
+          $ref: ../components/schemas/workflow.yaml#/RequestType
+      - name: applicantId
+        in: query
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 承認待ちの申請。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/workflow.yaml#/RequestSummaryList
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized

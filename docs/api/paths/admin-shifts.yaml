@@ -1,0 +1,213 @@
+# 管理: シフト表・勤務予定（/api/v1/admin）。bearerAuth の admin スコープ。
+shiftPlan:
+  get:
+    tags: [admin-shifts]
+    operationId: getShiftPlan
+    x-module: AdminOps
+    summary: シフト表を取得する
+    description: 部署×期間のシフト表（下書きまたは公開済み）と検証の結果を返す（AD04）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentId
+      - $ref: ../components/parameters.yaml#/Period
+    responses:
+      "200":
+        description: シフト表。まだなければ `status` が `none` の空の表。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/ShiftPlan
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+  put:
+    tags: [admin-shifts]
+    operationId: saveShiftPlanDraft
+    x-module: AdminOps
+    summary: シフト表の下書きを保存する
+    description: セルをすべて置き換えて下書きとして保存し、検証の結果を返す（UC-AD-04）。公開済みのシフトは変えない。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentId
+      - $ref: ../components/parameters.yaml#/Period
+      - name: If-Match
+        in: header
+        description: 既存の下書きを上書きする場合は必須（新規作成では省略）。
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/ShiftPlanUpsert
+    responses:
+      "200":
+        description: 保存した下書き。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/ShiftPlan
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+shiftPlanPublish:
+  post:
+    tags: [admin-shifts]
+    operationId: publishShiftPlan
+    x-module: AdminOps
+    summary: シフト表を公開する
+    description: |
+      下書きを検証し、エラー（1か月単位の変形の総枠超過など）がなければ公開する（UC-AD-04）。
+      セルの内容から勤務予定を作り、対象の従業員にメールで知らせる。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentId
+      - $ref: ../components/parameters.yaml#/Period
+      - $ref: ../components/parameters.yaml#/IfMatch
+    responses:
+      "200":
+        description: 公開した。警告があれば返す。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/ShiftPlanPublishResult
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "409":
+        description: 下書きがない（SHIFT_PLAN_NOT_FOUND）、締め済み（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+      "422":
+        description: 検証のエラーがある（SHIFT_PLAN_INVALID）。`errors` に内容を入れる。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+shiftPlanCsv:
+  get:
+    tags: [admin-shifts]
+    operationId: exportShiftPlanCsv
+    x-module: AdminOps
+    summary: シフト表を CSV で出力する
+    description: 下書き（なければ公開済み）のシフト表を、取込と同じ形式（CSV の形式 §3.2）で出力する（UC-AD-05）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentId
+      - $ref: ../components/parameters.yaml#/Period
+      - name: encoding
+        in: query
+        description: 文字コード（省略するとテナントの既定）。
+        schema:
+          $ref: ../components/schemas/common.yaml#/CsvExportEncoding
+    responses:
+      "200":
+        description: シフト表の CSV。
+        content:
+          text/csv:
+            schema:
+              type: string
+              format: binary
+              description: CSV のバイト列（文字コードは `encoding`）。
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+  put:
+    tags: [admin-shifts]
+    operationId: importShiftPlanCsv
+    x-module: AdminOps
+    summary: シフト表を CSV で取り込む
+    description: CSV（CSV の形式 §3.2）を検証し、誤りがなければ下書きを置き換える（UC-AD-05）。誤りがあれば何も変えない。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentId
+      - $ref: ../components/parameters.yaml#/Period
+      - name: encoding
+        in: query
+        description: 文字コード（既定 `utf8`）。
+        schema:
+          $ref: ../components/schemas/common.yaml#/CsvImportEncoding
+    requestBody:
+      required: true
+      content:
+        text/csv:
+          schema:
+            type: string
+            format: binary
+            description: CSV のバイト列。文字コードは `encoding` で示す。上限は 4MB（4,194,304 バイト。Base64 で受け取ると関数の上限 6MB に近づくため）。
+    responses:
+      "200":
+        description: 取込の結果。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/ImportResult
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "413":
+        description: 大きすぎる（PAYLOAD_TOO_LARGE。4MB 超）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+employeeSchedule:
+  patch:
+    tags: [admin-shifts]
+    operationId: changeSchedule
+    x-module: AdminOps
+    summary: 公開後の勤務予定を変更する
+    description: |
+      変更事由を必須にして勤務予定を変更し、履歴を残して本人に知らせる（UC-AD-06）。
+      1か月単位の変形では、就業規則上の変更事由で対象日より前の変更だけが時間外の判定の基準を変える。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/WorkDate
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/merge-patch+json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/ScheduleChange
+    responses:
+      "200":
+        description: 変更後の勤務予定。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/WorkSchedule
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+      "409":
+        description: 締め済み（PERIOD_CLOSED）、未公開（SCHEDULE_NOT_PUBLISHED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed

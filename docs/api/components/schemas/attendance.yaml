@@ -1,0 +1,533 @@
+# 打刻・勤務予定・勤怠の型
+PunchType:
+  type: string
+  enum: [clockIn, clockOut, breakStart, breakEnd]
+PunchSource:
+  type: string
+  enum: [web, mobile, kiosk, api]
+TodayStatus:
+  type: string
+  description: 当日の打刻の状態。
+  enum: [notStarted, working, onBreak, finished]
+Location:
+  type: object
+  required: [latitude, longitude]
+  properties:
+    latitude:
+      type: number
+      minimum: -90
+      maximum: 90
+    longitude:
+      type: number
+      minimum: -180
+      maximum: 180
+    accuracyMeters:
+      type: number
+      minimum: 0
+PunchCreateRequest:
+  type: object
+  required: [type]
+  properties:
+    type:
+      $ref: "#/PunchType"
+    clientTime:
+      type: string
+      format: date-time
+      description: 端末の時刻（参考値）。計算にはサーバーの受信時刻を使う。
+    location:
+      $ref: "#/Location"
+    note:
+      type: string
+      maxLength: 200
+Punch:
+  type: object
+  required: [punchId, type, occurredAt, effectiveAt, workDate, source, status]
+  properties:
+    punchId:
+      $ref: common.yaml#/Ulid
+    type:
+      $ref: "#/PunchType"
+    occurredAt:
+      type: string
+      format: date-time
+      description: サーバーの受信時刻（秒まで）。
+    effectiveAt:
+      type: string
+      format: date-time
+      description: 計算に使う時刻（従業員に不利にならない方向で分に丸めた値）。
+    clientTime:
+      type:
+        - string
+        - "null"
+      format: date-time
+    clientTimeSkewed:
+      type: boolean
+      description: 端末時刻とサーバー時刻の差が許容値を超えた。
+    workDate:
+      type: string
+      format: date
+    source:
+      $ref: "#/PunchSource"
+    deviceId:
+      $ref: common.yaml#/NullableUlid
+    location:
+      oneOf:
+        - $ref: "#/Location"
+        - type: "null"
+    note:
+      type:
+        - string
+        - "null"
+    status:
+      type: string
+      description: "`voided` は補正で無効にした打刻、`added` は補正で追加した打刻。"
+      enum: [active, voided, added]
+Break:
+  type: object
+  required: [startMinute, endMinute]
+  properties:
+    startMinute:
+      $ref: common.yaml#/MinuteOfDay
+    endMinute:
+      $ref: common.yaml#/MinuteOfDay
+ScheduleSummary:
+  type: object
+  description: 勤務予定の要約。
+  required: [dayType]
+  properties:
+    dayType:
+      $ref: common.yaml#/DayType
+    workPatternId:
+      $ref: common.yaml#/NullableUlid
+    workPatternName:
+      type:
+        - string
+        - "null"
+    startMinute:
+      $ref: common.yaml#/NullableMinuteOfDay
+    endMinute:
+      $ref: common.yaml#/NullableMinuteOfDay
+    breaks:
+      type: array
+      items:
+        $ref: "#/Break"
+    scheduledMinutes:
+      $ref: common.yaml#/Minutes
+WorkSchedule:
+  description: 従業員×勤務日の勤務予定（公開済みのもの）。
+  allOf:
+    - $ref: "#/ScheduleSummary"
+    - type: object
+      required: [employeeId, workDate, source]
+      properties:
+        employeeId:
+          $ref: common.yaml#/Ulid
+        workDate:
+          type: string
+          format: date
+        source:
+          type: string
+          enum: [rule, shiftPlan, manual]
+        changedAfterPublish:
+          type: boolean
+          description: 公開後に変更された。
+        lastChangedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        etag:
+          $ref: common.yaml#/ETagValue
+Warning:
+  type: object
+  description: ホームに出す警告。
+  required: [code, message]
+  properties:
+    code:
+      type: string
+      examples:
+        - missingPunch
+    message:
+      type: string
+    workDate:
+      type: string
+      format: date
+    requestId:
+      $ref: common.yaml#/Ulid
+DayLeave:
+  type: object
+  description: その日の休暇。
+  required: [leaveTypeId, leaveTypeName, unit, minutes]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    leaveTypeName:
+      type: string
+    unit:
+      $ref: leave.yaml#/LeaveUnit
+    startMinute:
+      $ref: common.yaml#/MinuteOfDay
+    endMinute:
+      $ref: common.yaml#/MinuteOfDay
+    minutes:
+      $ref: common.yaml#/Minutes
+    requestId:
+      $ref: common.yaml#/Ulid
+Today:
+  type: object
+  description: 当日の状態（ホームの表示に使う）。
+  required: [serverTime, workDate, status, availableActions, punches, warnings]
+  properties:
+    serverTime:
+      type: string
+      format: date-time
+      description: サーバーの現在時刻。画面の時計の補正に使う。
+    workDate:
+      type: string
+      format: date
+    status:
+      $ref: "#/TodayStatus"
+    availableActions:
+      type: array
+      description: いま押せる打刻の種類。退勤済みの日は `clockOut`（押し直し）を含む。
+      items:
+        $ref: "#/PunchType"
+    schedule:
+      oneOf:
+        - $ref: "#/ScheduleSummary"
+        - type: "null"
+    punches:
+      type: array
+      items:
+        $ref: "#/Punch"
+    leaves:
+      type: array
+      items:
+        $ref: "#/DayLeave"
+    warnings:
+      type: array
+      items:
+        $ref: "#/Warning"
+    pendingApprovalCount:
+      type: integer
+      minimum: 0
+      description: 自分が承認すべき申請の件数（承認者でなければ 0）。
+PunchCreateResponse:
+  type: object
+  required: [punch, today]
+  properties:
+    punch:
+      $ref: "#/Punch"
+    today:
+      $ref: "#/Today"
+Segment:
+  type: object
+  description: 日別勤怠の区間。
+  required: [kind, start, end, origin]
+  properties:
+    kind:
+      type: string
+      enum: [work, break]
+    start:
+      type: string
+      format: date-time
+    end:
+      type: string
+      format: date-time
+    origin:
+      type: string
+      enum: [punch, rule, adjustment]
+DailyResults:
+  type: object
+  description: 日別勤怠の計算結果（分）。
+  required:
+    - actualWorkMinutes
+    - scheduledWorkedMinutes
+    - outsideScheduleMinutes
+    - overtimeWithinStatutoryMinutes
+    - statutoryOvertimeMinutes
+    - lateNightMinutes
+    - statutoryHolidayWorkMinutes
+    - lateArrivalMinutes
+    - earlyLeaveMinutes
+    - breakMinutes
+    - absence
+  properties:
+    actualWorkMinutes:
+      $ref: common.yaml#/Minutes
+    scheduledWorkedMinutes:
+      $ref: common.yaml#/Minutes
+    outsideScheduleMinutes:
+      $ref: common.yaml#/Minutes
+    overtimeWithinStatutoryMinutes:
+      $ref: common.yaml#/Minutes
+    statutoryOvertimeMinutes:
+      $ref: common.yaml#/Minutes
+    statutoryOvertimeOver60Minutes:
+      $ref: common.yaml#/Minutes
+    lateNightMinutes:
+      $ref: common.yaml#/Minutes
+    lateNightOvertimeMinutes:
+      $ref: common.yaml#/Minutes
+    statutoryHolidayWorkMinutes:
+      $ref: common.yaml#/Minutes
+    lateNightHolidayMinutes:
+      $ref: common.yaml#/Minutes
+    nonStatutoryHolidayWorkMinutes:
+      $ref: common.yaml#/Minutes
+    lateArrivalMinutes:
+      $ref: common.yaml#/Minutes
+    earlyLeaveMinutes:
+      $ref: common.yaml#/Minutes
+    breakMinutes:
+      $ref: common.yaml#/Minutes
+    absence:
+      type: boolean
+    coreTimeMissingMinutes:
+      $ref: common.yaml#/Minutes
+    deemedMinutes:
+      $ref: common.yaml#/Minutes
+AttendanceError:
+  type: object
+  required: [code, severity]
+  properties:
+    code:
+      type: string
+      enum:
+        - missingClockOut
+        - missingBreakEnd
+        - punchSequence
+        - insufficientBreak
+        - clientTimeSkew
+        - legalHolidayNotSecured
+        - absenceSuspected
+    severity:
+      type: string
+      enum: [error, warning]
+DailyAttendance:
+  type: object
+  description: 日別勤怠（一覧用）。
+  required: [workDate, dayType, results, leaves, errors, provisional, locked]
+  properties:
+    workDate:
+      type: string
+      format: date
+    dayType:
+      $ref: common.yaml#/DayType
+    schedule:
+      oneOf:
+        - $ref: "#/ScheduleSummary"
+        - type: "null"
+    firstClockIn:
+      type:
+        - string
+        - "null"
+      format: date-time
+    lastClockOut:
+      type:
+        - string
+        - "null"
+      format: date-time
+    results:
+      $ref: "#/DailyResults"
+    leaves:
+      type: array
+      items:
+        $ref: "#/DayLeave"
+    errors:
+      type: array
+      items:
+        $ref: "#/AttendanceError"
+    provisional:
+      type: boolean
+      description: 週や期間の時間外がまだ確定していない（見込みの値を含む）。
+    locked:
+      type: boolean
+      description: 締め済み。
+    adjusted:
+      type: boolean
+      description: 補正がある。
+Adjustment:
+  type: object
+  description: 打刻の補正。
+  required: [adjustmentId, operations, reason, createdAt]
+  properties:
+    adjustmentId:
+      $ref: common.yaml#/Ulid
+    operations:
+      type: array
+      items:
+        $ref: "#/AdjustmentOperation"
+    reason:
+      type: string
+    requestId:
+      $ref: common.yaml#/NullableUlid
+    adjustedBy:
+      oneOf:
+        - $ref: common.yaml#/EmployeeRef
+        - type: "null"
+    createdAt:
+      type: string
+      format: date-time
+AdjustmentOperation:
+  type: object
+  description: 補正の操作。打刻の追加（`add`）か、既存の打刻の無効化（`void`）。時刻の変更は「無効化＋追加」で表す。
+  required: [op]
+  properties:
+    op:
+      type: string
+      enum: [add, void]
+  discriminator:
+    propertyName: op
+    mapping:
+      add: "#/AdjustmentAddOperation"
+      void: "#/AdjustmentVoidOperation"
+AdjustmentAddOperation:
+  description: 打刻の追加（`op` は `add`）。
+  allOf:
+    - $ref: "#/AdjustmentOperation"
+    - type: object
+      required: [type, at]
+      properties:
+        type:
+          $ref: "#/PunchType"
+        at:
+          type: string
+          format: date-time
+AdjustmentVoidOperation:
+  description: 既存の打刻の無効化（`op` は `void`）。
+  allOf:
+    - $ref: "#/AdjustmentOperation"
+    - type: object
+      required: [punchId]
+      properties:
+        punchId:
+          $ref: common.yaml#/Ulid
+DailyAttendanceDetail:
+  description: 日別勤怠の詳細。
+  allOf:
+    - $ref: "#/DailyAttendance"
+    - type: object
+      required: [punches, adjustments, segments]
+      properties:
+        punches:
+          type: array
+          description: 元の打刻と、補正で追加した打刻（無効にしたものも含む）。
+          items:
+            $ref: "#/Punch"
+        adjustments:
+          type: array
+          items:
+            $ref: "#/Adjustment"
+        segments:
+          type: array
+          items:
+            $ref: "#/Segment"
+        etag:
+          $ref: common.yaml#/ETagValue
+PeriodTotals:
+  type: object
+  description: 期間の集計（分・日数）。
+  required: [workDays, absenceDays, results]
+  properties:
+    workDays:
+      type: integer
+    absenceDays:
+      type: integer
+    statutoryHolidayWorkDays:
+      type: integer
+    nonStatutoryHolidayWorkDays:
+      type: integer
+    lateArrivalCount:
+      type: integer
+    earlyLeaveCount:
+      type: integer
+    results:
+      $ref: "#/DailyResults"
+    leaves:
+      type: array
+      description: 休暇の種別ごとの取得。
+      items:
+        type: object
+        required: [leaveTypeId, leaveTypeName, amount]
+        properties:
+          leaveTypeId:
+            $ref: common.yaml#/Ulid
+          leaveTypeName:
+            type: string
+          amount:
+            $ref: common.yaml#/LeaveAmount
+    rounded:
+      type:
+        - object
+        - "null"
+      description: 月合計の端数処理（30分基準）を有効にしている場合の処理後の値。
+      properties:
+        statutoryOvertimeMinutes:
+          $ref: common.yaml#/Minutes
+        statutoryOvertimeOver60Minutes:
+          $ref: common.yaml#/Minutes
+        statutoryHolidayWorkMinutes:
+          $ref: common.yaml#/Minutes
+        lateNightMinutes:
+          $ref: common.yaml#/Minutes
+FlexSettlement:
+  type: object
+  description: フレックスの清算期間の状況。
+  required: [contractualTotalMinutes, statutoryLimitMinutes, actualMinutes, leaveDeemedMinutes, balanceMinutes]
+  properties:
+    contractualTotalMinutes:
+      $ref: common.yaml#/Minutes
+    statutoryLimitMinutes:
+      $ref: common.yaml#/Minutes
+    actualMinutes:
+      $ref: common.yaml#/Minutes
+    leaveDeemedMinutes:
+      $ref: common.yaml#/Minutes
+    balanceMinutes:
+      $ref: common.yaml#/SignedMinutes
+    carriedInMinutes:
+      $ref: common.yaml#/Minutes
+    carriedOutMinutes:
+      $ref: common.yaml#/Minutes
+    shortageHandling:
+      type: string
+      enum: [carryOver, deduct]
+    final:
+      type: boolean
+      description: 清算期間が締め済みで確定している。
+Timesheet:
+  type: object
+  description: 期間の勤怠（日別と集計）。
+  required: [employee, period, closed, closeVersion, days, totals]
+  properties:
+    employee:
+      $ref: common.yaml#/EmployeeRef
+    period:
+      $ref: common.yaml#/Period
+    closed:
+      type: boolean
+    closeVersion:
+      type:
+        - integer
+        - "null"
+      description: 締め済みなら、最新の締めの版。締めていなければ null。
+    days:
+      type: array
+      items:
+        $ref: "#/DailyAttendance"
+    totals:
+      $ref: "#/PeriodTotals"
+    flex:
+      oneOf:
+        - $ref: "#/FlexSettlement"
+        - type: "null"
+WorkScheduleList:
+  type: object
+  description: 勤務予定の一覧（日付順）。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/WorkSchedule"

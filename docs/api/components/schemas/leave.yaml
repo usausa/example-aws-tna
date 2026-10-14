@@ -1,0 +1,499 @@
+# 休暇の型
+LeaveUnit:
+  type: string
+  description: 休暇の単位。
+  enum: [fullDay, amHalf, pmHalf, hourly]
+LeaveCategory:
+  type: string
+  enum: [annualPaid, special, childNursing, familyCare]
+LeaveLot:
+  type: object
+  description: 付与ロット。
+  required: [grantId, grantDate, lastUsableDate, granted, remaining, reason]
+  properties:
+    grantId:
+      $ref: common.yaml#/Ulid
+    grantDate:
+      type: string
+      format: date
+    lastUsableDate:
+      type: string
+      format: date
+    granted:
+      $ref: common.yaml#/LeaveAmount
+    remaining:
+      $ref: common.yaml#/LeaveAmount
+    reason:
+      type: string
+      enum: [auto, manual, carryOver, adjustment]
+LeaveBalance:
+  type: object
+  description: 休暇種別ごとの残り。
+  required: [leaveTypeId, leaveTypeName, category, available, pending, lots]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    leaveTypeName:
+      type: string
+    category:
+      $ref: "#/LeaveCategory"
+    available:
+      $ref: common.yaml#/LeaveAmount
+    pending:
+      $ref: common.yaml#/LeaveAmount
+      description: 承認待ちの申請で使う予定の量。
+    lots:
+      type: array
+      items:
+        $ref: "#/LeaveLot"
+    nextExpiry:
+      oneOf:
+        - $ref: "#/LeaveExpiry"
+        - type: "null"
+    hourly:
+      type:
+        - object
+        - "null"
+      description: 時間単位の取得の状況（時間単位が使える種別だけ）。
+      properties:
+        dayMinutes:
+          $ref: common.yaml#/Minutes
+          description: 1日の時間数（分）。
+        usedMinutes:
+          $ref: common.yaml#/Minutes
+        capMinutes:
+          $ref: common.yaml#/Minutes
+          description: その年に時間単位で取れる上限（5日分）。
+LeaveObligation:
+  type: object
+  description: 年5日の取得義務。
+  required: [obligationId, employee, periodStart, periodEnd, requiredDays, takenDays, remainingDays, status]
+  properties:
+    obligationId:
+      $ref: common.yaml#/Ulid
+    employee:
+      $ref: common.yaml#/EmployeeRef
+    periodStart:
+      type: string
+      format: date
+    periodEnd:
+      type: string
+      format: date
+    requiredDays:
+      type: number
+      multipleOf: 0.5
+    takenDays:
+      type: number
+      multipleOf: 0.5
+    remainingDays:
+      type: number
+      multipleOf: 0.5
+    status:
+      $ref: "#/LeaveObligationStatus"
+MyLeave:
+  type: object
+  required: [leaveTypes, balances, obligations]
+  properties:
+    leaveTypes:
+      type: array
+      description: 申請できる休暇種別（有効なものだけ）。申請の画面で、単位や理由の要否の判断に使う。
+      items:
+        $ref: "#/LeaveType"
+    balances:
+      type: array
+      items:
+        $ref: "#/LeaveBalance"
+    obligations:
+      type: array
+      items:
+        $ref: "#/LeaveObligation"
+LeaveType:
+  type: object
+  required: [leaveTypeId, code, name, category, paid, units, balanceManaged, attendanceRateTreatment, requiresApproval, reasonRequired, status, builtIn]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    code:
+      type: string
+      maxLength: 20
+    name:
+      type: string
+      maxLength: 50
+    category:
+      $ref: "#/LeaveCategory"
+    paid:
+      type: boolean
+    units:
+      type: array
+      items:
+        $ref: "#/LeaveUnit"
+      minItems: 1
+    balanceManaged:
+      type: boolean
+    attendanceRateTreatment:
+      type: string
+      enum: [countAsPresent, excludeFromWorkdays, countAsAbsent]
+    fiscalYearStart:
+      type:
+        - string
+        - "null"
+      pattern: "^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+      description: 年度の起算日（`MM-DD`）。子の看護等休暇・介護休暇で使う。
+    allowMidDayHourly:
+      type: boolean
+      description: 時間単位の中抜けを認めるか（既定 true）。
+    requiresApproval:
+      type: boolean
+    reasonRequired:
+      type: boolean
+    status:
+      type: string
+      enum: [active, inactive]
+    builtIn:
+      type: boolean
+      readOnly: true
+      description: テナントの開設時に用意された法定の種別（削除できない）。
+    etag:
+      $ref: common.yaml#/ETagValue
+LeavePolicy:
+  type: object
+  description: 有給の付与ルール。
+  required: [leavePolicyId, code, name, method, consumptionOrder, hourlyLeave, halfDay]
+  properties:
+    leavePolicyId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    code:
+      type: string
+    name:
+      type: string
+    method:
+      type: string
+      enum: [hireDateBased, uniform]
+    uniformGrantDate:
+      type:
+        - string
+        - "null"
+      pattern: "^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+      description: 一斉付与の基準日（`MM-DD`）。
+    firstGrant:
+      type: string
+      enum: [statutoryFirst, advanceToUniformDate]
+      description: 一斉付与の初回の扱い。
+    grantTable:
+      type: string
+      enum: [statutory, custom]
+    customTable:
+      type:
+        - object
+        - "null"
+      description: 法定を上回る独自の付与日数表（勤続0.5年、1.5年…6.5年以上の7段階）。
+      properties:
+        normal:
+          type: array
+          items:
+            type: number
+          minItems: 7
+          maxItems: 7
+    consumptionOrder:
+      type: string
+      enum: [oldestFirst, newestFirst]
+    hourlyLeave:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        unitMinutes:
+          type: integer
+          enum: [60, 120, 180, 240]
+    halfDay:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    etag:
+      $ref: common.yaml#/ETagValue
+LeaveGrantPlan:
+  type: object
+  description: 有給の付与予定（UC-AD-10）。
+  required: [planId, employee, leaveTypeId, grantDate, days, grantKind, attendanceRate, status]
+  properties:
+    planId:
+      $ref: common.yaml#/Ulid
+    employee:
+      $ref: common.yaml#/EmployeeRef
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    grantDate:
+      type: string
+      format: date
+    days:
+      type: number
+      multipleOf: 0.5
+    grantKind:
+      type: string
+      enum: [normal, proportional]
+    attendanceRate:
+      type: number
+      minimum: 0
+      maximum: 1
+    basis:
+      type: object
+      description: 判定の根拠。
+      properties:
+        weeklyScheduledDays:
+          type:
+            - number
+            - "null"
+        weeklyScheduledMinutes:
+          type:
+            - integer
+            - "null"
+        evaluationFrom:
+          type: string
+          format: date
+        evaluationTo:
+          type: string
+          format: date
+        workdays:
+          type: integer
+        presentDays:
+          type: integer
+        deemedPresentDays:
+          type: integer
+    status:
+      $ref: "#/LeaveGrantPlanStatus"
+    holdReasons:
+      type: array
+      items:
+        type: string
+        enum: [attendanceRateBelowThreshold, unresolvedErrors]
+    decisionReason:
+      type:
+        - string
+        - "null"
+LeaveGrantPlanDecision:
+  type: object
+  required: [decision]
+  properties:
+    decision:
+      type: string
+      enum: [approve, decline]
+    reason:
+      type: string
+      description: 付与しない（decline）場合は必須。
+ManualGrantCreate:
+  type: object
+  required: [leaveTypeId, grantDate, amount, lastUsableDate, reason]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    grantDate:
+      type: string
+      format: date
+    amount:
+      $ref: common.yaml#/LeaveAmount
+    lastUsableDate:
+      type: string
+      format: date
+    reason:
+      type: string
+      maxLength: 200
+LeaveAdjustmentCreate:
+  type: object
+  required: [leaveTypeId, delta, reason]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    grantId:
+      $ref: common.yaml#/Ulid
+      description: 対象の付与ロット。省略すると消化順のルールで決める。
+    delta:
+      $ref: common.yaml#/SignedLeaveAmount
+    reason:
+      type: string
+      maxLength: 200
+LeaveDesignationCreate:
+  type: object
+  description: 時季指定の登録（UC-AD-12）。
+  required: [dates, opinionRecord]
+  properties:
+    dates:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [date, unit]
+        properties:
+          date:
+            type: string
+            format: date
+          unit:
+            type: string
+            enum: [fullDay, amHalf, pmHalf]
+    opinionRecord:
+      type: object
+      description: 本人の意見を聴いた記録。
+      required: [heardAt, method]
+      properties:
+        heardAt:
+          type: string
+          format: date-time
+        method:
+          type: string
+          enum: [meeting, email, form, other]
+        note:
+          type: string
+          maxLength: 500
+StatutoryEntitlement:
+  type: object
+  description: 子の看護等休暇・介護休暇の年度ごとの日数。
+  required: [fiscalYear, days, excluded]
+  properties:
+    fiscalYear:
+      type: integer
+      description: 年度の開始年。
+    days:
+      type: integer
+      enum: [5, 10]
+    excluded:
+      type: string
+      description: 労使協定による対象外。
+      enum: [none, all, hourlyOnly]
+    dayMinutes:
+      $ref: common.yaml#/Minutes
+      readOnly: true
+      description: 1日の時間数（分）。所定労働時間から求める。
+LeaveObligationStatus:
+  type: string
+  description: 年5日の取得義務の状態（期間中、達成、期限切れで未達）。
+  enum: [inProgress, fulfilled, overdue]
+LeaveGrantPlanStatus:
+  type: string
+  description: 付与予定の状態（予定、保留、付与を承認、付与しない、付与済み）。
+  enum: [planned, held, approved, declined, granted]
+LeaveTypeList:
+  type: object
+  description: 休暇種別の一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/LeaveType"
+LeavePolicyList:
+  type: object
+  description: 付与ルールの一覧。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/LeavePolicy"
+LeaveGrantPlanList:
+  type: object
+  description: 付与予定の一覧。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/LeaveGrantPlan"
+    nextToken:
+      $ref: common.yaml#/PageToken
+LeaveObligationList:
+  type: object
+  description: 年5日の取得義務の一覧。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/LeaveObligation"
+    nextToken:
+      $ref: common.yaml#/PageToken
+EmployeeLeaveBalance:
+  type: object
+  description: 従業員の1つの休暇種別の残り。
+  required: [employee, available, pending]
+  properties:
+    employee:
+      $ref: common.yaml#/EmployeeRef
+    available:
+      $ref: common.yaml#/LeaveAmount
+    pending:
+      $ref: common.yaml#/LeaveAmount
+      description: 承認待ちの申請で使う予定の量。
+    nextExpiry:
+      oneOf:
+        - $ref: "#/LeaveExpiry"
+        - type: "null"
+    obligationStatus:
+      oneOf:
+        - $ref: "#/LeaveObligationStatus"
+        - type: "null"
+      description: 年5日の取得義務の状態（年次有給休暇で、対象の期間にある人だけ）。
+EmployeeLeaveBalanceList:
+  type: object
+  description: 従業員別の残りの一覧（社員番号の順）。
+  required: [leaveTypeId, items, nextToken]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    items:
+      type: array
+      items:
+        $ref: "#/EmployeeLeaveBalance"
+    nextToken:
+      $ref: common.yaml#/PageToken
+LeaveExpiry:
+  type: object
+  description: 次に失効する日と量。
+  required: [date, amount]
+  properties:
+    date:
+      type: string
+      format: date
+    amount:
+      $ref: common.yaml#/LeaveAmount
+LeaveOfAbsenceKind:
+  type: string
+  description: 休業の種類（休暇仕様 §9.3）。`other` は休職。
+  enum: [maternity, childcare, postnatalChildcare, familyCare, workInjury, other]
+LeaveOfAbsence:
+  type: object
+  description: 休業の期間。
+  required: [leaveOfAbsenceId, kind, startDate]
+  properties:
+    leaveOfAbsenceId:
+      $ref: common.yaml#/Ulid
+      readOnly: true
+    kind:
+      $ref: "#/LeaveOfAbsenceKind"
+    startDate:
+      type: string
+      format: date
+    endDate:
+      type:
+        - string
+        - "null"
+      format: date
+      description: 終了日（その日を含む）。未定なら null。
+    attendanceRateTreatment:
+      type: string
+      enum: [countAsPresent, excludeFromWorkdays, countAsAbsent]
+      description: 有給の出勤率での扱い。休職（`other`）のときに必須（就業規則に従う）。ほかの種類は法令により出勤とみなすため、指定しない。
+    etag:
+      $ref: common.yaml#/ETagValue
+LeaveOfAbsenceList:
+  type: object
+  description: 従業員の休業の一覧（開始日の順）。
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/LeaveOfAbsence"

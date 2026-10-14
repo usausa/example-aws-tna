@@ -1,0 +1,345 @@
+# 管理: 勤怠・アラート・監査ログ・出力・ジョブ（/api/v1/admin）。bearerAuth の admin スコープ。
+dashboard:
+  get:
+    tags: [admin-attendance]
+    operationId: getDashboard
+    x-module: AdminOps
+    summary: ダッシュボードを取得する
+    description: 管理範囲の未解決のエラー、承認待ち、アラート、締めの状況の件数を返す（UC-AD-01）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+    responses:
+      "200":
+        description: 件数。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/Dashboard
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+timesheets:
+  get:
+    tags: [admin-attendance]
+    operationId: listTimesheets
+    x-module: AdminOps
+    summary: 勤怠を一覧で取得する
+    description: 部署と期間を指定して、従業員ごとの集計を返す（UC-AD-02）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: period
+        in: query
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/PeriodId
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+      - $ref: ../components/parameters.yaml#/IncludeDescendants
+      - name: filter
+        in: query
+        description: 絞り込み。
+        schema:
+          $ref: ../components/schemas/admin.yaml#/TimesheetFilter
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 従業員ごとの集計。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/TimesheetList
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+employeeTimesheet:
+  get:
+    tags: [admin-attendance]
+    operationId: getEmployeeTimesheet
+    x-module: AdminOps
+    summary: 従業員の月の勤怠を取得する
+    description: 管理範囲の従業員の、期間の日別勤怠と集計を返す（AD03）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/Period
+    responses:
+      "200":
+        description: 期間の勤怠。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/Timesheet
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+employeeDailyAttendance:
+  get:
+    tags: [admin-attendance]
+    operationId: getEmployeeDailyAttendance
+    x-module: AdminOps
+    summary: 従業員の日別の詳細を取得する
+    description: 打刻、補正の履歴、区間、計算結果、エラーを返す（AD03）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/WorkDate
+    responses:
+      "200":
+        description: 日別勤怠の詳細。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/DailyAttendanceDetail
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+employeeAdjustments:
+  post:
+    tags: [admin-attendance]
+    operationId: createAdjustment
+    x-module: AdminOps
+    summary: 勤怠を補正する
+    description: |
+      打刻の追加・無効化を理由とともに記録し、日別勤怠を再計算する（UC-AD-03）。本人にメールで知らせる。
+      自分自身の勤怠は補正できない。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/EmployeeId
+      - $ref: ../components/parameters.yaml#/WorkDate
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+      - $ref: ../components/parameters.yaml#/IfMatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/AdjustmentCreate
+    responses:
+      "201":
+        description: 補正した。補正後の日別勤怠を返す（再計算は非同期のため `provisional` のことがある）。
+        headers:
+          ETag:
+            $ref: ../components/headers.yaml#/ETag
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/attendance.yaml#/DailyAttendanceDetail
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        description: 範囲外、または自分自身（SELF_OPERATION_NOT_ALLOWED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "409":
+        description: 締め済み（PERIOD_CLOSED）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+      "412":
+        $ref: ../components/responses.yaml#/PreconditionFailed
+      "422":
+        description: 補正後の打刻の順序の誤り（CORRECTION_SEQUENCE_INVALID）。
+        content:
+          application/problem+json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Problem
+alerts:
+  get:
+    tags: [admin-attendance]
+    operationId: listAlerts
+    x-module: AdminOps
+    summary: アラートの一覧を取得する
+    description: 管理範囲のアラートを新しい順に返す（UC-AD-09）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: kind
+        in: query
+        schema:
+          $ref: ../components/schemas/admin.yaml#/AlertKind
+      - name: status
+        in: query
+        schema:
+          $ref: ../components/schemas/admin.yaml#/AlertStatus
+      - $ref: ../components/parameters.yaml#/DepartmentIdQuery
+      - $ref: ../components/parameters.yaml#/FromDate
+      - $ref: ../components/parameters.yaml#/ToDate
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: アラートの一覧。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/AlertList
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+alertAcknowledge:
+  post:
+    tags: [admin-attendance]
+    operationId: acknowledgeAlert
+    x-module: AdminOps
+    summary: アラートを対応済みにする
+    description: 対応のメモを残して対応済みにする（UC-AD-09）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: alertId
+        in: path
+        required: true
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/AlertAcknowledge
+    responses:
+      "200":
+        description: 対応済みにしたアラート。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/Alert
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound
+auditLogs:
+  get:
+    tags: [admin-attendance]
+    operationId: listAuditLogs
+    x-module: AdminOps
+    summary: 監査ログを検索する
+    description: 勤怠管理者は管理範囲の従業員に関するものだけ、テナント管理者はすべてを返す（UC-AD-14）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/FromDate
+      - $ref: ../components/parameters.yaml#/ToDate
+      - name: actorEmployeeId
+        in: query
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: targetEmployeeId
+        in: query
+        schema:
+          $ref: ../components/schemas/common.yaml#/Ulid
+      - name: action
+        in: query
+        schema:
+          type: string
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: 監査ログ。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/admin.yaml#/AuditLogList
+      "401":
+        $ref: ../components/responses.yaml#/Unauthorized
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+exports:
+  post:
+    tags: [admin-attendance]
+    operationId: createExport
+    x-module: AdminOps
+    summary: CSV の出力を依頼する
+    description: 出力のジョブを受け付ける（UC-AD-08）。作成が終わると、ジョブの結果からダウンロードできる。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../components/schemas/admin.yaml#/ExportRequest
+    responses:
+      "202":
+        description: 受け付けた。
+        headers:
+          Location:
+            $ref: ../components/headers.yaml#/Location
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Job
+      "400":
+        $ref: ../components/responses.yaml#/BadRequest
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+jobs:
+  get:
+    tags: [admin-attendance]
+    operationId: listJobs
+    x-module: AdminOps
+    summary: ジョブの一覧を取得する
+    description: 呼び出した人が作ったジョブ（作成から7日以内）を新しい順に返す（AD06）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - name: type
+        in: query
+        schema:
+          $ref: ../components/schemas/common.yaml#/JobType
+      - $ref: ../components/parameters.yaml#/Limit
+      - $ref: ../components/parameters.yaml#/NextToken
+    responses:
+      "200":
+        description: ジョブの一覧。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/JobList
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+job:
+  get:
+    tags: [admin-attendance]
+    operationId: getJob
+    x-module: AdminOps
+    summary: ジョブの状況を取得する
+    description: 出力・取込・締めなどのジョブの状況と結果を返す（UC-AD-08、AD06）。
+    security:
+      - bearerAuth: [admin]
+    parameters:
+      - $ref: ../components/parameters.yaml#/JobId
+    responses:
+      "200":
+        description: ジョブ。
+        content:
+          application/json:
+            schema:
+              $ref: ../components/schemas/common.yaml#/Job
+      "403":
+        $ref: ../components/responses.yaml#/Forbidden
+      "404":
+        $ref: ../components/responses.yaml#/NotFound

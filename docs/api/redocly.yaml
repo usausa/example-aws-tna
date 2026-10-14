@@ -1,0 +1,46 @@
+# 検証（lint）と結合（bundle）の設定。手順は手元の __tooling.md（git に入れない）の「検証と結合」。
+apis:
+  tenant@v1:
+    root: openapi.yaml
+  ops@v1:
+    root: ops/openapi.yaml
+extends:
+  - recommended
+rules:
+  # テナント向けの非公開 API のため、ライセンスは書かない。
+  info-license: off
+  # 4xx・5xx は RFC 9457 の Problem Details で返す。
+  operation-4xx-problem-details-rfc7807: error
+  # 使ってよいメディアタイプ。
+  request-mime-type:
+    severity: error
+    allowedValues:
+      - application/json
+      - application/merge-patch+json
+      - text/csv
+  response-mime-type:
+    severity: error
+    allowedValues:
+      - application/json
+      - application/problem+json
+      - text/csv
+  # 結合したときにコンポーネントの名前がぶつからないようにする。
+  component-name-unique: error
+  paths-kebab-case: error
+  path-http-verbs-order: error
+  # 操作を実装する関数のモジュール（全体構成 §4.2）。操作の表と関数の一覧の生成に使う。
+  rule/operation-module:
+    subject:
+      type: Operation
+      property: x-module
+    assertions:
+      defined: true
+      enum:
+        - Auth
+        - Punch
+        - Self
+        - AdminOps
+        - AdminSettings
+        - Ops
+    message: Every operation needs x-module (the module of the function that implements it).
+    severity: error

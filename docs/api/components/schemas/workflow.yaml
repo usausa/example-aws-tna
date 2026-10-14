@@ -1,0 +1,338 @@
+# 申請・承認の型
+RequestType:
+  type: string
+  description: 申請の種類（MVP は休暇と打刻修正）。
+  enum: [leave, punchCorrection]
+RequestStatus:
+  type: string
+  enum: [pending, approved, rejected, sentBack, withdrawn, cancellationPending, cancelled]
+RequestAction:
+  type: string
+  description: |
+    申請への操作。`withdraw`・`resubmit`・`requestCancel` は申請者、
+    `approve`・`sendBack`・`reject`・`approveCancel`・`rejectCancel` は現在の段の承認者、`adminCancel` は管理者。
+  enum: [approve, sendBack, reject, withdraw, resubmit, requestCancel, approveCancel, rejectCancel, adminCancel]
+LeaveRequestInput:
+  type: object
+  description: 休暇申請の内容。
+  required: [leaveTypeId, from, unit]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    from:
+      type: string
+      format: date
+    to:
+      type: string
+      format: date
+      description: 期間の申請の終了日（省略すると1日）。期間の中の休日は除く。
+    unit:
+      $ref: leave.yaml#/LeaveUnit
+    startMinute:
+      $ref: common.yaml#/MinuteOfDay
+      description: 時間単位のときの開始。
+    endMinute:
+      $ref: common.yaml#/MinuteOfDay
+      description: 時間単位のときの終了。
+PunchCorrectionInput:
+  type: object
+  description: 打刻修正申請の内容。
+  required: [workDate, operations]
+  properties:
+    workDate:
+      type: string
+      format: date
+    operations:
+      type: array
+      minItems: 1
+      items:
+        $ref: attendance.yaml#/AdjustmentOperation
+RequestCreate:
+  type: object
+  description: 申請の作成。`type` で分ける。
+  required: [type]
+  properties:
+    type:
+      $ref: "#/RequestType"
+  discriminator:
+    propertyName: type
+    mapping:
+      leave: "#/LeaveRequestCreate"
+      punchCorrection: "#/PunchCorrectionRequestCreate"
+LeaveRequestCreate:
+  description: 休暇申請の作成（`type` は `leave`）。
+  allOf:
+    - $ref: "#/RequestCreate"
+    - type: object
+      required: [leave]
+      properties:
+        leave:
+          $ref: "#/LeaveRequestInput"
+        reason:
+          type: string
+          maxLength: 500
+          description: 理由。必須かどうかは休暇種別の設定による（年次有給休暇では必須にしない）。
+PunchCorrectionRequestCreate:
+  description: 打刻修正申請の作成（`type` は `punchCorrection`）。
+  allOf:
+    - $ref: "#/RequestCreate"
+    - type: object
+      required: [punchCorrection, reason]
+      properties:
+        punchCorrection:
+          $ref: "#/PunchCorrectionInput"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+ExpandedLeaveDate:
+  type: object
+  description: 期間の申請を日ごとに展開したもの。
+  required: [date, unit, amount]
+  properties:
+    date:
+      type: string
+      format: date
+    unit:
+      $ref: leave.yaml#/LeaveUnit
+    startMinute:
+      $ref: common.yaml#/MinuteOfDay
+    endMinute:
+      $ref: common.yaml#/MinuteOfDay
+    amount:
+      $ref: common.yaml#/LeaveAmount
+ApprovalStep:
+  type: object
+  required: [order, approvers, status]
+  properties:
+    order:
+      type: integer
+      minimum: 1
+      maximum: 5
+    approvers:
+      type: array
+      items:
+        $ref: common.yaml#/EmployeeRef
+    resolvedBy:
+      type: string
+      description: 承認者の決まり方（ルールどおり、上位の所属長、勤怠管理者、テナント管理者）。
+      enum: [rule, upperManager, attendanceAdmin, tenantAdmin]
+    status:
+      type: string
+      enum: [waiting, pending, approved, skipped]
+    decidedBy:
+      oneOf:
+        - $ref: common.yaml#/EmployeeRef
+        - type: "null"
+    decidedAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+ApprovalHistoryItem:
+  type: object
+  required: [action, actor, round, at]
+  properties:
+    action:
+      type: string
+      description: 履歴の操作。申請（`submit`）と、RequestAction の操作。
+      enum: [submit, approve, sendBack, reject, withdraw, resubmit, requestCancel, approveCancel, rejectCancel, adminCancel]
+    actor:
+      $ref: common.yaml#/EmployeeRef
+    step:
+      type:
+        - integer
+        - "null"
+    round:
+      type: integer
+    comment:
+      type:
+        - string
+        - "null"
+    at:
+      type: string
+      format: date-time
+RequestSummary:
+  type: object
+  required: [requestId, type, status, applicant, targetFrom, targetTo, createdAt]
+  properties:
+    requestId:
+      $ref: common.yaml#/Ulid
+    type:
+      $ref: "#/RequestType"
+    status:
+      $ref: "#/RequestStatus"
+    applicant:
+      $ref: common.yaml#/EmployeeRef
+    targetFrom:
+      type: string
+      format: date
+    targetTo:
+      type: string
+      format: date
+    title:
+      type: string
+      description: 一覧の表示用（例「年次有給休暇 10/20 全日」）。
+    currentStep:
+      type:
+        - integer
+        - "null"
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+Request:
+  description: 申請の詳細。
+  allOf:
+    - $ref: "#/RequestSummary"
+    - type: object
+      required: [round, steps, history]
+      properties:
+        reason:
+          type:
+            - string
+            - "null"
+        leave:
+          oneOf:
+            - $ref: "#/RequestLeaveDetail"
+            - type: "null"
+        punchCorrection:
+          oneOf:
+            - $ref: "#/PunchCorrectionInput"
+            - type: "null"
+        round:
+          type: integer
+          description: 差戻し後の再申請の回数（最初は 1）。
+        steps:
+          type: array
+          items:
+            $ref: "#/ApprovalStep"
+        history:
+          type: array
+          items:
+            $ref: "#/ApprovalHistoryItem"
+        allowedActions:
+          type: array
+          description: 呼び出した人がいまできる操作。
+          items:
+            $ref: "#/RequestAction"
+        context:
+          oneOf:
+            - $ref: "#/RequestContext"
+            - type: "null"
+        etag:
+          $ref: common.yaml#/ETagValue
+RequestContext:
+  type: object
+  description: 承認の参考情報（`include=context` を指定し、承認者または管理者の場合だけ返す）。
+  properties:
+    leaveBalances:
+      type: array
+      items:
+        $ref: leave.yaml#/LeaveBalance
+    obligation:
+      oneOf:
+        - $ref: leave.yaml#/LeaveObligation
+        - type: "null"
+    correction:
+      type:
+        - object
+        - "null"
+      properties:
+        before:
+          type: array
+          items:
+            $ref: attendance.yaml#/Punch
+        after:
+          type: array
+          items:
+            $ref: attendance.yaml#/Punch
+        currentResults:
+          $ref: attendance.yaml#/DailyResults
+RequestActionInput:
+  type: object
+  required: [action]
+  properties:
+    action:
+      $ref: "#/RequestAction"
+    comment:
+      type: string
+      maxLength: 500
+      description: "`sendBack`・`reject`・`requestCancel`・`adminCancel` では必須。"
+    resubmission:
+      oneOf:
+        - $ref: "#/RequestCreate"
+        - type: "null"
+      description: "`resubmit` のときの修正後の内容（種類は変えられない）。"
+RequestInclude:
+  type: string
+  description: 申請の詳細に加える情報（`context` は承認の参考情報）。
+  enum: [context]
+RequestSummaryList:
+  type: object
+  description: 申請の一覧（新しい順）。
+  required: [items, nextToken]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/RequestSummary"
+    nextToken:
+      $ref: common.yaml#/PageToken
+RequestLeaveDetail:
+  type: object
+  description: 休暇申請の内容（日ごとに展開したもの）。
+  required: [leaveTypeId, leaveTypeName, dates, total]
+  properties:
+    leaveTypeId:
+      $ref: common.yaml#/Ulid
+    leaveTypeName:
+      type: string
+    dates:
+      type: array
+      items:
+        $ref: "#/ExpandedLeaveDate"
+    total:
+      $ref: common.yaml#/LeaveAmount
+RequestPreview:
+  type: object
+  description: 申請の試算（申請は作らない）。申請の画面で、取得前後の残りや承認者を示し、誤りを先に知らせるのに使う。
+  required: [steps, issues]
+  properties:
+    leave:
+      oneOf:
+        - $ref: "#/LeavePreview"
+        - type: "null"
+    steps:
+      type: array
+      description: この内容で申請したときの承認の段と承認者。
+      items:
+        $ref: "#/ApprovalStep"
+    issues:
+      type: array
+      description: 申請すると 409・422 になる誤り（残りの不足、単位の誤り、締め済みなど）。誤りがなければ空。
+      items:
+        $ref: common.yaml#/ValidationIssue
+LeavePreview:
+  type: object
+  description: 休暇申請の試算。
+  required: [dates, total, balanceBefore, balanceAfter]
+  properties:
+    dates:
+      type: array
+      items:
+        $ref: "#/ExpandedLeaveDate"
+    total:
+      $ref: common.yaml#/LeaveAmount
+    balanceBefore:
+      oneOf:
+        - $ref: common.yaml#/LeaveAmount
+        - type: "null"
+      description: 取得前の残り（承認待ちの申請の分を引いた量）。残りを管理しない種別では null。
+    balanceAfter:
+      oneOf:
+        - $ref: common.yaml#/LeaveAmount
+        - type: "null"
+      description: 取得後の残り。
