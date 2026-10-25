@@ -10,8 +10,9 @@
 | プロジェクト | 分け方と名前は検証のリポジトリと同じにし、ソリューションのフォルダ（Shared、Backend、Frontend、Local、IaC、Tools、Test）に置く。一覧と状態は [実装計画と進捗](plan.md#-プロジェクト) |
 | 言葉 | ソースのコメントと画面の文言は日本語。ログのメッセージは英語（運用の検索と道具に合わせる） |
 | SDK | SDK の版を `global.json` で固定しない |
-| パッケージ | 版は csproj に直接書いて固定する（中央の管理を使わない） |
-| 検証 | 単位ごとに、Release のビルド（警告0）、テスト（`dotnet run --project`）、InspectCode（ソリューション全体の解析、0件）、改行（CRLF）を確かめる。手順と台本は `.claude/skills/verify/` |
+| パッケージ | 版は csproj に直接書いて固定する（中央の管理を使わない）。足すときは最新の安定版にし、Microsoft の 10.0 系のパッケージは同じ版にそろえる |
+| ハンドラのライブラリ | nuget.org に公開した版を使う。拡張は 2.0.0-beta9 から。リポジトリにパッケージのファイルを置かない |
+| 検証 | 単位ごとに、Release のビルド（警告0）、生成物が最新か、テスト（`dotnet run --project`）、InspectCode（ソリューション全体の解析、0件）、OpenAPI の lint、改行（CRLF）を確かめる。手順と台本は `.claude/skills/verify/` |
 | 文書 | docs には残す価値のある文書だけを、決定の番号や経緯を除いた今の形で置く。API の仕様（`docs/api`）、全体構成とデータ設計（`docs/design`）は先に置き、ほかの仕様と機能の文書は、使う単位で足す。計画と進捗は `docs/plan.md` |
 
 ## 画面

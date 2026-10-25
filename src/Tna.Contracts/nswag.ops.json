@@ -1,0 +1,38 @@
+{
+  "runtime": "Net100",
+  "defaultVariables": "Input=../../docs/api/dist/ops-openapi.yaml,Output=obj/generated/OpsContracts.g.cs,TemplateDirectory=NSwagTemplates/Dto",
+  "documentGenerator": {
+    "fromDocument": {
+      "url": "$(Input)"
+    }
+  },
+  "codeGenerators": {
+    "openApiToCSharpClient": {
+      "namespace": "Tna.Contracts.Ops",
+      "additionalNamespaceUsages": [
+        "Tna.Contracts"
+      ],
+      "excludedTypeNames": [
+        "Problem",
+        "ValidationIssue",
+        "ValidationIssueSeverity"
+      ],
+      "jsonLibrary": "SystemTextJson",
+      "jsonLibraryVersion": 9.0,
+      "jsonPolymorphicSerializationStyle": "SystemTextJson",
+      "generateDataAnnotations": false,
+      "generateClientClasses": false,
+      "generateClientInterfaces": false,
+      "generateExceptionClasses": false,
+      "generateDtoTypes": true,
+      "generateNullableReferenceTypes": true,
+      "generateOptionalPropertiesAsNullable": true,
+      "dateType": "System.DateOnly",
+      "dateTimeType": "System.DateTimeOffset",
+      "anyType": "System.Text.Json.JsonElement",
+      "templateDirectory": "$(TemplateDirectory)",
+      "newLineBehavior": "CRLF",
+      "output": "$(Output)"
+    }
+  }
+}

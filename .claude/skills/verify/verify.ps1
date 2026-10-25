@@ -1,4 +1,4 @@
-# 作業の単位の検証: Release ビルド (警告 0)、テスト (dotnet run)、InspectCode (0 件)、改行 (CRLF)
+# 作業の単位の検証: Release ビルド (警告 0)、生成物、テスト (dotnet run)、InspectCode (0 件)、OpenAPI、改行 (CRLF)
 # 手順の説明は同じフォルダの SKILL.md
 $ErrorActionPreference = 'Stop'
 $root = (git -C $PSScriptRoot rev-parse --show-toplevel).Trim()
@@ -13,13 +13,27 @@ function Write-Step([string] $name) {
 # Build
 #--------------------------------------------------------------------------------
 
-# プロジェクトのないソリューションはビルドできないため、1〜3 を飛ばす
+# プロジェクトのないソリューションはビルドできないため、1〜4 を飛ばす
 $hasProjects = Select-String -Path $solution -Pattern '<Project ' -Quiet
 if ($hasProjects) {
     Write-Step 'Build'
     dotnet build $solution -c Release -warnaserror -nologo
     if ($LASTEXITCODE -ne 0) {
         $failures.Add('Build')
+    }
+}
+
+#--------------------------------------------------------------------------------
+# Generated files
+#--------------------------------------------------------------------------------
+
+# コミットした生成物 (入力の検証とパターン) が、OpenAPI から作り直したものと同じか。生成の道具があるときだけ
+$generator = Join-Path $root 'tools/Tna.Tools.Generator/Tna.Tools.Generator.csproj'
+if ($hasProjects -and ($failures.Count -eq 0) -and (Test-Path $generator)) {
+    Write-Step 'Generated files'
+    dotnet run --project $generator -c Release --no-build -- --verify
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add('Generated files')
     }
 }
 
@@ -71,6 +85,26 @@ if ($hasProjects -and ($failures.Count -eq 0)) {
     }
     finally {
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+#--------------------------------------------------------------------------------
+# OpenAPI
+#--------------------------------------------------------------------------------
+
+# API の仕様 (docs/api) を規則で確かめる。道具は npm から取って動かす (Node が要る)。設定があるときだけ
+$api = Join-Path $root 'docs/api'
+if (Test-Path (Join-Path $api 'redocly.yaml')) {
+    Write-Step 'OpenAPI'
+    Push-Location $api
+    try {
+        npx --yes @redocly/cli@2.59.0 lint
+        if ($LASTEXITCODE -ne 0) {
+            $failures.Add('OpenAPI')
+        }
+    }
+    finally {
+        Pop-Location
     }
 }
 

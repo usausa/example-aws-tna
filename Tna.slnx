@@ -10,11 +10,14 @@
   <Folder Name="/IaC/">
   </Folder>
   <Folder Name="/Shared/">
+    <Project Path="src/Tna.Contracts/Tna.Contracts.csproj" />
   </Folder>
   <Folder Name="/Tools/">
+    <Project Path="tools/Tna.Tools.Generator/Tna.Tools.Generator.csproj" />
   </Folder>
   <Folder Name="/Test/">
     <Project Path="tests/Tna.FrontendTests/Tna.FrontendTests.csproj" />
+    <Project Path="tests/Tna.UnitTests/Tna.UnitTests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
